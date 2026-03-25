@@ -1,195 +1,134 @@
 ---
-name: nnunet-segmentor
-version: 1.0.0
-category: medical_ai_segmentation
-description: |
-  [FUNCTION]: nnU-Net v1 pancreatic tumor segmentation (MSD Task07 model)
-  [VALUE]: Provides tumor volume and location (Label 2) for PDAC detection. May produce FALSE NEGATIVES for isodense tumors
-  [TRIGGER_HOOK]: Read this Skill AFTER totalseg-segmentor. Use for tumor detection, but CHECK for false negatives via LLaVA-Med
-  [WARNING]: This model may produce FALSE NEGATIVES (0ml tumor) for isodense tumors. Always cross-reference with LLaVA-Med suspicion score!
+name: nnunet_segmentor
+category: tumor_segmentation
+description: nnU-Net v1 (MSD Task07) for pancreatic tumor segmentation. WARNING: May produce FALSE NEGATIVES (0ml) for isodense tumors. Deep Drill Protocol is MANDATORY for 0ml results.
 ---
 
-# nnU-Net Tumor Segmentation: Cognitive Execution Protocol
+# nnU-Net Segmentor: Cognitive Execution Protocol
 
-## Identity & Core Mechanism
-This skill runs nnU-Net v1 (MSD Task07 Pancreas model) via conda environment `nnunetv2`. Trained on Medical Segmentation Decathlon (MSD) pancreatic tumor dataset.
+## 1. Identity & Clinical Mindset
+You are the Tumor Detection Specialist. Your goal is to segment pancreatic tumors using the gold-standard nnU-Net model trained on MSD Task07.
 
-**Model Characteristics:**
-- Labels: 0=background, 1=pancreas parenchyma, 2=tumor
-- Input: Venous phase CT, isotropic 1.0mm³
-- Output: 3-class segmentation mask
-- Known Limitation: May miss isodense tumors (HU overlap with normal pancreas)
+**⚠️ CRITICAL WARNING**: nnU-Net relies on HU thresholding. PDAC tumors with desmoplastic stroma appear ISODENSE (same HU as normal pancreas) and may return **0ml** (false negative).
 
----
+**Your duty**: When volume = 0ml, you MUST trigger **Deep Drill Protocol** (multi-window VLM analysis) before concluding "no tumor".
 
-## Phase 1: Environment Setup
+## 2. API Contract (Execution)
+**Environment**: `conda run -n nnunetv2`
+**Executable**: `nnUNet_predict` (nnU-Net CLI)
+**Arguments**:
+- `-i <path>`: Input directory
+- `-o <path>`: Output directory
+- `-t Task007_Pancreas`: Task name
+- `-m 3d_fullres`: Model configuration
 
-**Purpose:** Configure nnU-Net environment variables
+**(Agent, you MUST set nnU-Net environment variables first!)**
 
-**CRITICAL:** These environment variables MUST be set before execution:
+## 3. Cognitive Reasoning & SOP
 
+### Step 0: Environment Setup (MANDATORY)
 ```bash
-export nnUNet_raw_data_base="/workspace/sandbox/data/models/nnunet/nnunet_v1_workspace/raw"
-export nnUNet_preprocessed="/workspace/sandbox/data/models/nnunet/nnunet_v1_workspace/preprocessed"
-export RESULTS_FOLDER="/workspace/sandbox/data/models/nnunet/nnunet_v1_workspace/results"
-export TMPDIR="/workspace/sandbox/tmp"
+export nnUNet_raw_data_base="/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/raw"
+export nnUNet_preprocessed="/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/preprocessed"
+export RESULTS_FOLDER="/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/results"
 ```
 
----
-
-## Phase 2: Input Preparation
-
-**Purpose:** Copy input to nnU-Net raw data directory
-
-**Execution Command:**
+### Step 1: Verify Prerequisites
 ```bash
+# Check NIfTI exists (DISCOVER, don't assume)
+find /workspace/sandbox/data/processed/nifti -name "*{PATIENT_ID}*.nii.gz"
+
+# Check model weights exist
+ls $RESULTS_FOLDER/nnUNet/3d_fullres/Task007_Pancreas/ 2>/dev/null || echo "Model not found!"
+```
+
+### Step 2: Prepare Input
+```bash
+# Copy to nnU-Net raw data directory with proper naming
 mkdir -p ${nnUNet_raw_data_base}/nnUNet_raw_data/Task007_Pancreas/imagesTs
-cp /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz \
+cp {DISCOVERED_NIFTI_PATH} \
    ${nnUNet_raw_data_base}/nnUNet_raw_data/Task007_Pancreas/imagesTs/{PATIENT_ID}_0000.nii.gz
 ```
 
-**Naming Convention:**
-- nnU-Net requires `{CASE_ID}_0000.nii.gz` suffix
-- `_0000` indicates single modality (CT only)
+### Step 3: Check for Cached Results
+```bash
+# Check if output already exists
+ls /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz 2>/dev/nul
 
----
+# If exists: Skip to analysis
+# If not: Proceed
+```
 
-## Phase 3: nnU-Net Inference
-
-**Purpose:** Run tumor segmentation
-
-**CRITICAL: Check for cached results**
-Before execution, check if output exists:
-- Path: `/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz`
-- If EXISTS: Skip inference, proceed to analysis
-- If NOT EXISTS: Proceed
-
-**Execution Command:**
+### Step 4: Execute nnU-Net
 ```bash
 conda run -n nnunetv2 nnUNet_predict \
     -i ${nnUNet_raw_data_base}/nnUNet_raw_data/Task007_Pancreas/imagesTs \
     -o /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/ \
     -t Task007_Pancreas \
-    -m 3d_fullres \
-    --num_threads_preprocessing 4 \
-    --num_threads_nifti_save 4
+    -m 3d_fullres
 ```
 
-**Expected Duration:** 5-10 minutes on GPU
-
----
-
-## Phase 4: Output Analysis (CRITICAL)
-
-**Purpose:** Extract tumor mask and calculate volume
-
-**Execution Command:**
+### Step 5: Analyze Output
 ```bash
-conda run -n ChangHai python /skills/nnunet_segmentor/scripts/analyze_tumor.py \
-    --input /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz \
-    --patient-id {PATIENT_ID} \
-    --output-dir /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/
+# Calculate tumor volume from label 2
+python -c "
+import nibabel as nib
+import numpy as np
+
+seg = nib.load('/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz').get_fdata()
+tumor_mask = (seg == 2).astype(np.uint8)
+volume_ml = np.sum(tumor_mask) * np.prod([1.0, 1.0, 1.0]) / 1000
+
+print(f'Tumor Volume: {volume_ml:.2f} ml')
+print(f'Has Tumor: {volume_ml > 0}')
+
+if volume_ml == 0:
+    print('⚠️ WARNING: Potential false negative - consider Deep Drill')
+"
 ```
 
-**Expected Output:**
-```json
-{
-  "patient_id": "{PATIENT_ID}",
-  "labels_detected": [0, 1, 2],
-  "tumor_volume_ml": 0.0,
-  "tumor_voxels": 0,
-  "pancreas_volume_ml": 65.47,
-  "has_tumor": false,
-  "warning": "FALSE_NEGATIVE_POSSIBLE",
-  "model": "nnU-Net v1 MSD Task07"
-}
+## 4. Deep Drill Protocol (MANDATORY for 0ml)
+
+**⚠️ If tumor_volume_ml = 0, DO NOT conclude "no tumor"!**
+
+### Deep Drill Trigger Condition:
+```python
+if tumor_volume_ml == 0:
+    TRIGGER_DEEP_DRILL()
 ```
 
-**⚠️ FALSE NEGATIVE DETECTION:**
-If `tumor_volume_ml` == 0.0:
-1. This is a POTENTIAL false negative
-2. nnU-Net failed to detect tumor (common for isodense tumors)
-3. MUST cross-reference with LLaVA-Med suspicion score
-4. If LLaVA score > 1.5 → ENDOGENOUS_FALSE_NEGATIVE detected
+### Deep Drill Actions:
+1. **Generate multi-window Tiled image**:
+   ```bash
+   python /skills/master_slice_extractor/scripts/extract_tiled_master_slice.py \
+       --ct {DISCOVERED_NIFTI_PATH} \
+       --pancreas-mask /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz
+   ```
 
----
+2. **VLM Visual Confirmation**:
+   - Use `analyze_image` tool on Tiled image
+   - Query: "Analyze for isodense masses in narrow window"
 
-## Phase 5: Extract Binary Tumor Mask
+3. **Decision Matrix**:
+   | nnU-Net | VLM Assessment | Conclusion |
+   |---------|----------------|------------|
+   | 0ml | Normal | True negative |
+   | 0ml | Suspicious | **ENDOGENOUS_FALSE_NEGATIVE** |
 
-**Purpose:** Create binary mask for downstream analysis
+## 5. Success Criteria
+- [ ] nnU-Net executed with correct environment variables
+- [ ] Tumor volume calculated
+- [ ] **If volume = 0ml: Deep Drill triggered**
+- [ ] Results documented with physical traceability
 
-**Execution Command:**
-```bash
-conda run -n ChangHai python /skills/nnunet_segmentor/scripts/extract_tumor_mask.py \
-    --input /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz \
-    --output /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/true_tumor_mask.nii.gz
+## 6. Citation Format
+```
+[Script: nnUNet_predict, Output: {PATIENT_ID}.nii.gz, Labels: [0,1,2]]
+[Script: tumor_analysis.py, Output: Tumor_Volume: {X}ml, Has_Tumor: {true/false}]
 ```
 
-**Output:**
-- Binary mask (0=background, 1=tumor)
-- If no tumor detected: All zeros
-
----
-
-## Output Files
-
-1. **Raw Segmentation (3-class):**
-   - Path: `/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz`
-   - Labels: 0, 1, 2
-
-2. **Binary Tumor Mask:**
-   - Path: `/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/true_tumor_mask.nii.gz`
-   - Binary: 0 or 1
-
-3. **Analysis Report:**
-   - Path: `/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/tumor_analysis.json`
-
----
-
-## Quality Checkpoints
-
-- [ ] Output file exists and is readable
-- [ ] Labels are [0, 1] or [0, 1, 2]
-- [ ] Tumor volume calculated (may be 0)
-- [ ] Pancreas volume matches TotalSegmentator output (±5ml)
-
-**Citation Format:**
-- Segmentation: `[Tool: nnU-Net, Labels: {values}, Volume: {value}ml]`
-- If false negative: `[Tool: nnU-Net, Volume: 0ml, Warning: FALSE_NEGATIVE_POSSIBLE]`
-
----
-
-## False Negative Protocol
-
-**When tumor_volume_ml == 0:**
-
-1. **DO NOT conclude "no tumor"**
-2. **Flag for cognitive dissonance monitoring**
-3. **Proceed to LLaVA-Med analysis**
-4. **Compare semantic suspicion score**
-
-**Example (CL-03356):**
+**Special Citation for 0ml with Deep Drill**:
 ```
-nnU-Net Result: 0ml tumor
-LLaVA-Med Suspicion Score: 3.4/1.5
-Conclusion: ENDOGENOUS_FALSE_NEGATIVE
-Reason: Desmoplastic reaction causing isodense appearance
+[Script: nnUNet_predict, Output: Tumor_Volume: 0ml]
+[Deep Drill: Triggered - Multi-window VLM analysis initiated]
 ```
-
----
-
-## Error Handling
-
-**Common Issues:**
-
-1. **Model not found:**
-   - Check RESULTS_FOLDER path
-   - Verify MSD Task07 weights downloaded
-
-2. **Out of memory:**
-   - Reduce `--num_threads_preprocessing`
-   - Ensure GPU has >8GB VRAM
-
-3. **Wrong labels:**
-   - Verify input is venous phase CT
-   - Check HU range [-1024, 2000]

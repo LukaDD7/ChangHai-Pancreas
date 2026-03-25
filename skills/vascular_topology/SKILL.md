@@ -1,196 +1,118 @@
 ---
-name: vascular-topology
-version: 1.0.0
-category: vascular_analysis
-description: |
-  [FUNCTION]: Vascular topology analysis for PDAC resectability assessment
-  [VALUE]: Evaluates SMA/SMV involvement, vessel encasement, and resectability classification
-  [TRIGGER_HOOK]: CONDITIONAL - Only if tumor detected AND surgery considered. Use AFTER nnunet-segmentor (if tumor>0) or adw-ceo-reporter (if conflict detected). Optional for complete MDT workflow
+name: vascular_topology
+category: 3d_spatial_computation
+description: Calculates tumor wrapping angles around SMA, SMV, CA, and PV. Determines NCCN resectability classification. CRITICAL for surgical planning.
 ---
 
 # Vascular Topology: Cognitive Execution Protocol
 
-## Identity & Core Mechanism
-This skill analyzes vascular relationships for PDAC resectability assessment. Evaluates Superior Mesenteric Artery (SMA), Superior Mesenteric Vein (SMV), and portal vein involvement.
+## 1. Identity & Clinical Mindset
+You are the 3D Geometric Computation Specialist. Your goal is to determine surgical resectability by calculating how many degrees the tumor wraps around critical mesenteric vessels.
 
-**When to Use:**
-- Tumor detected (>0ml) AND surgery being considered
-- Conflict detected (suspected tumor) AND need vascular assessment
-- Complete MDT workflow requiring resectability classification
+**Key Principle**: Resectability is not binary. It's determined by the geometric relationship between tumor and vessels.
+- SMA encasement >180° = Unresectable (arterial involvement)
+- SMV occlusion without reconstruction = Unresectable
+- <180° involvement = Borderline (neoadjuvant therapy candidate)
 
----
+**Clinical Stakes**:
+- Over-call resectable → Failed surgery, complications
+- Under-call resectable → Missed curative opportunity
 
-## Phase 1: Input Validation
+## 2. API Contract (Execution)
+**Environment**: `conda run -n ChangHai`
+**Executable**: `/media/luzhenyang/project/ChangHai_PDA/skills/vascular_topology/scripts/calculate_angles.py`
+**Arguments**:
+- `--tumor-mask <path>`: Binary tumor mask from nnU-Net
+- `--vessel-dir <path>`: Directory with TotalSegmentator vessel masks
+- `--patient-id <id>`: Patient identifier
+- `--output <path>`: JSON output path
 
-**Required Inputs:**
-1. CT Volume: `/workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz`
-2. TotalSegmentator Vessels: `/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/`
-   - `superior_mesenteric_vein.nii.gz`
-   - `portal_vein_and_splenic_vein.nii.gz`
-   - `aorta.nii.gz`
-3. Tumor Mask (if available): `/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/true_tumor_mask.nii.gz`
+**(Agent, you MUST verify tumor mask and vessels exist before running!)**
 
-**Verify Inputs:**
+## 3. Cognitive Reasoning & SOP
+
+### Step 1: Environmental Discovery
 ```bash
-ls -lh /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/superior_mesenteric_vein.nii.gz
-ls -lh /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/portal_vein_and_splenic_vein.nii.gz
+# Discover actual file paths (DON'T assume)
+find /workspace/sandbox/data/processed/segmentations -name "*{PATIENT_ID}*" -type d
+
+# Check for tumor mask
+find /workspace/sandbox/data/processed/segmentations -name "*tumor*{PATIENT_ID}*.nii.gz" 2>/dev/null
+
+# Check for vessel masks
+ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/ | grep -E "(sma|smv|portal|celiac)"
 ```
 
----
-
-## Phase 2: Vascular Segmentation Enhancement
-
-**Purpose:** Ensure high-quality vessel segmentation
-
-**Execution Command:**
+### Step 2: Verify Prerequisites
 ```bash
-conda run -n ChangHai python /skills/vascular_topology/scripts/enhance_vessels.py \
-    --ct /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz \
+# Required files must exist:
+# 1. Tumor mask (binary, 0/1)
+# 2. SMA mask
+# 3. SMV mask
+# 4. Portal vein mask (optional)
+# 5. Celiac artery mask (optional)
+
+for file in "{tumor_mask}" "{sma_mask}" "{smv_mask}"; do
+    if [ ! -f "$file" ]; then
+        echo "ERROR: Missing $file"
+    fi
+done
+```
+
+**If tumor mask is empty (all zeros)**:
+- nnU-Net returned 0ml
+- Cannot calculate precise vessel involvement
+- Note in report: "Vascular assessment limited - tumor not detected by segmentation"
+- Still assess baseline vessel anatomy
+
+### Step 3: Execute Angle Calculation
+```bash
+conda run -n ChangHai python /skills/vascular_topology/scripts/calculate_angles.py \
+    --tumor-mask {DISCOVERED_TUMOR_MASK} \
     --vessel-dir /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/ \
-    --output /workspace/sandbox/data/processed/vascular/{PATIENT_ID}/
-```
-
----
-
-## Phase 3: Vascular Topology Analysis
-
-**Purpose:** Calculate vessel-tumor relationships
-
-**Metrics:**
-- **Contact Length**: mm of vessel circumference in contact with tumor
-- **Encasement Angle**: degrees of vessel circumference surrounded
-- **Involvement Score**: 0 (none), 1 (<180°), 2 (>180°), 3 (occlusion)
-
-**Execution Command:**
-```bash
-conda run -n ChangHai python /skills/vascular_topology/scripts/analyze_topology.py \
     --patient-id {PATIENT_ID} \
-    --ct /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz \
-    --vessel-dir /workspace/sandbox/data/processed/vascular/{PATIENT_ID}/ \
-    --tumor-mask /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/true_tumor_mask.nii.gz \
     --output /workspace/sandbox/data/results/vascular/{PATIENT_ID}_vascular_assessment.json
 ```
 
-**Expected Output:**
-```json
-{
-  "patient_id": "{PATIENT_ID}",
-  "vessels_analyzed": {
-    "SMA": {
-      "contact_length_mm": 12.5,
-      "encasement_degrees": 135,
-      "involvement_score": 1,
-      "status": "borderline_resectable"
-    },
-    "SMV": {
-      "contact_length_mm": 18.3,
-      "encasement_degrees": 225,
-      "involvement_score": 2,
-      "status": "unresectable"
-    },
-    "portal_vein": {
-      "contact_length_mm": 8.2,
-      "encasement_degrees": 90,
-      "involvement_score": 1,
-      "status": "borderline_resectable"
-    }
-  },
-  "overall_classification": "BORDERLINE_RESECTABLE",
-  "recommendation": "Neoadjuvant therapy followed by re-evaluation"
-}
+### Step 4: Interpret Results
+
+**NCCN Resectability Criteria**:
+
+| Vessel | Resectable | Borderline | Unresectable |
+|--------|-----------|------------|--------------|
+| **SMA** | No contact OR abutment only | <180° contact | ≥180° encasement |
+| **CA** | Clear fat plane | Abutment | Encasement |
+| **SMV** | Patent | Narrowed/Reconstructible | Occluded (no reconstruction) |
+| **PV** | Patent | Narrowed/Reconstructible | Occluded (no reconstruction) |
+
+**Classification Logic**:
+```python
+if SMA_angle >= 180 or CA_angle >= 180:
+    classification = "UNRESECTABLE"
+elif SMA_angle > 0 or SMV_occluded:
+    classification = "BORDERLINE"
+else:
+    classification = "RESECTABLE"
 ```
 
----
+## 4. Error Handling & Deep Drill
 
-## Phase 4: Resectability Classification
+| Error | Diagnosis | Deep Drill Action |
+|-------|-----------|-------------------|
+| Tumor mask not found | nnU-Net not run | Go back to nnunet_segmentor |
+| Vessel masks missing | TotalSegmentator incomplete | Re-run with `--task total` |
+| Angle calculation fails | Tumor too small or scattered | Use VLM visual assessment instead |
+| SMA/SMV not segmented | Vessels outside FOV | Note limitation in report |
 
-**NCCN Criteria:**
-
-| Classification | Criteria |
-|----------------|----------|
-| **Resectable** | No arterial involvement, clear fat plane around SMA/CHA |
-| **Borderline** | <180° SMA/HA involvement, or reconstructible SMV/PV |
-| **Unresectable** | >180° SMA/HA encasement, or occluded SMV/PV without reconstruction |
-
-**Execution Command:**
-```bash
-conda run -n ChangHai python /skills/vascular_topology/scripts/classify_resectability.py \
-    --vascular-assessment /workspace/sandbox/data/results/vascular/{PATIENT_ID}_vascular_assessment.json \
-    --output /workspace/sandbox/data/results/vascular/{PATIENT_ID}_resectability.md
-```
-
----
-
-## Phase 5: Visualization (Optional)
-
-**Purpose:** Generate diagnostic figures
-
-**Execution Command:**
-```bash
-conda run -n ChangHai python /skills/vascular_topology/scripts/visualize_vessels.py \
-    --patient-id {PATIENT_ID} \
-    --ct /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz \
-    --vascular-assessment /workspace/sandbox/data/results/vascular/{PATIENT_ID}_vascular_assessment.json \
-    --output /workspace/sandbox/data/results/images/{PATIENT_ID}_vascular_overlay.png
-```
-
----
-
-## Output Files
-
-1. **Vascular Assessment JSON:**
-   - Path: `/workspace/sandbox/data/results/vascular/{PATIENT_ID}_vascular_assessment.json`
-
-2. **Resectability Report:**
-   - Path: `/workspace/sandbox/data/results/vascular/{PATIENT_ID}_resectability.md`
-
-3. **Visualization (Optional):**
-   - Path: `/workspace/sandbox/data/results/images/{PATIENT_ID}_vascular_overlay.png`
-
----
-
-## Integration with CEO Report
-
-**When Conflict Detected:**
-If `ENDOGENOUS_FALSE_NEGATIVE` detected, vascular assessment may be limited:
-- Tumor mask is empty (0ml)
-- Cannot calculate precise vessel involvement
-- Can still assess baseline vessel anatomy
-- Note in report: "Vascular assessment limited due to undetected tumor on CT"
-
-**When Tumor Detected:**
-Include vascular assessment in CEO report:
-```markdown
-## Vascular Assessment
-- SMA: {contact_length}mm, {encasement}°
-- SMV: {contact_length}mm, {encasement}°
-- Classification: {RESECTABLE/BORDERLINE/UNRESECTABLE}
-```
-
----
-
-## Quality Checkpoints
-
-- [ ] Vessel masks exist and non-empty
-- [ ] SMA and SMV both segmented
-- [ ] Contact lengths calculated
-- [ ] Resectability classification assigned
+## 5. Success Criteria
+- [ ] Tumor mask discovered and verified
+- [ ] Vessel masks exist (SMA, SMV minimum)
+- [ ] Angle calculation script executed
+- [ ] Results JSON generated with angles
+- [ ] NCCN classification assigned
 - [ ] Clinical recommendation provided
 
-**Citation Format:**
-- Vessels: `[Local: superior_mesenteric_vein.nii.gz, Contact: {value}mm]`
-- Classification: `[Tool: VascularTopology, SMA: {value}°, Classification: {value}]`
-
----
-
-## Conditional Execution
-
-**Skip This Skill If:**
-- Patient is not a surgical candidate
-- Tumor is clearly metastatic (liver, peritoneum)
-- Only diagnostic confirmation needed
-
-**Always Include If:**
-- Surgical resection being considered
-- Borderline resectable case
-- Need vascular involvement documentation
+## 6. Citation Format
+```
+[Script: calculate_angles.py, Output: {PATIENT_ID}_vascular_assessment.json, SMA: {X}°, SMV: {Y}°, Classification: {RESECTABLE/BORDERLINE/UNRESECTABLE}]
+```

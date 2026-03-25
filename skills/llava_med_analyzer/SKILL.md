@@ -1,248 +1,114 @@
 ---
-name: llava-med-analyzer
-version: 1.0.0
-category: vision_language_model
-description: |
-  [FUNCTION]: LLaVA-Med v1.5 vision-language analysis for PDAC detection in multi-window CT images
-  [VALUE]: Provides semantic assessment from VLM analysis using Agent's judgment. CRITICAL for detecting isodense tumors missed by nnU-Net
-  [TRIGGER_HOOK]: Read this Skill AFTER master-slice-extractor. Use analyze_image tool on Tiled image. Output semantic assessment for conflict detection
+name: llava_med_analyzer
+category: visual_reasoning
+description: LLaVA-Med/Qwen-VL vision-language analysis for PDAC detection. CRITICAL for Deep Drill Protocol when nnU-Net returns 0ml. Provides semantic assessment of isodense tumors invisible to HU-threshold segmentation.
 ---
 
 # LLaVA-Med Analyzer: Cognitive Execution Protocol
 
-## Identity & Core Mechanism
-This skill uses LLaVA-Med v1.5 (Mistral-7B) vision-language model via the `analyze_image` tool to detect PDAC signs in multi-window CT images, especially isodense tumors missed by segmentation.
+## 1. Identity & Clinical Mindset
+You are the Visual Reasoning Specialist. Your goal is to analyze multi-window CT images using Vision-Language Models (VLM) to detect isodense tumors missed by traditional segmentation.
 
-**Why VLM for Isodense Tumors:**
-- nnU-Net relies on HU thresholds (fails for isodense)
-- VLM can recognize morphological patterns (irregular, mass effect)
-- Multi-window input provides enhanced contrast for human-like perception
+**Key Principle**: Human radiologists don't just threshold HU values. They recognize patterns: irregular contours, mass effect, architectural distortion. VLM simulates this visual reasoning.
 
----
+**Deep Drill Context**:
+- Called when nnU-Net returns 0ml (suspected false negative)
+- Called to verify positive segmentation findings
+- Called for MDT presentation and radiologist communication
 
-## Phase 1: Input Validation
+## 2. API Contract (Execution)
+**Tool**: `analyze_image` (provided in main interactive_main.py)
+**Model**: Qwen-VL or LLaVA-Med v1.5
+**Input**: Tiled PNG image (1536×512, 3 windows)
+**Output**: Semantic assessment of tumor presence
 
-**Required Input:**
-- Tiled master slice: `/workspace/sandbox/data/results/images/{PATIENT_ID}_master_slice_tiled.png`
-- Must contain 3 window sections (Standard/Narrow/Soft)
+**(Agent, you MUST have Tiled image before calling!)**
 
-**Verify Input Exists:**
+## 3. Cognitive Reasoning & SOP
+
+### Step 1: Verify Prerequisites
 ```bash
-ls -lh /workspace/sandbox/data/results/images/{PATIENT_ID}_master_slice_tiled.png
+# Check Tiled image exists (DISCOVER, don't assume)
+find /workspace/sandbox/data/results/images -name "*{PATIENT_ID}*tiled*.png" 2>/dev/null
+
+# Expected output:
+# /workspace/sandbox/data/results/images/C3L-03356_master_slice_tiled.png
 ```
 
----
-
-## Phase 2: VLM Analysis
-
-**Purpose:** Analyze Tiled image for PDAC signs
-
-**Execution - Use analyze_image Tool:**
-
-The agent MUST call the `analyze_image` tool (provided in main interactive_main.py):
-
+### Step 2: Call analyze_image Tool
 ```python
-# This is executed by the agent, not via execute command
 analyze_image(
     image_path="/workspace/sandbox/data/results/images/{PATIENT_ID}_master_slice_tiled.png",
-    query="""Evaluate this pancreatic CT image for PDAC (Pancreatic Ductal Adenocarcinoma).
+    query="""Analyze this pancreatic CT for PDAC (Pancreatic Ductal Adenocarcinoma).
 
-This image shows the SAME pancreatic slice in 3 different window settings:
-- LEFT: Standard abdominal window (Center:40, Width:400)
-- CENTER: Narrow window (Center:40, Width:150) ← **FOCUS HERE for isodense lesions**
-- RIGHT: Soft tissue window (Center:50, Width:250)
+Image layout (left to right):
+- LEFT: Standard window (W:400, C:40) - general anatomy
+- CENTER: Narrow window (W:150, C:40) - ⭐ ISODENSE TUMOR DETECTION
+- RIGHT: Soft tissue window (W:250, C:50) - vessel boundaries
 
-The CENTER section (Narrow window) enhances contrast by 2.7x and is crucial for detecting isodense tumors that appear normal in standard window.
+Focus on the CENTER (narrow window) section. Isodense tumors appear here.
 
 Evaluate for:
-1. **Irregular contours** in pancreatic head
-2. **Hypo-attenuating areas** (darker regions) - especially in narrow window
-3. **Heterogeneous density** patterns
-4. **Mass effect** on surrounding vessels (SMV, SMA)
-5. **Loss of normal lobulation**
+1. Irregular pancreatic head contour
+2. Hypo-attenuating regions (darker in narrow window)
+3. Heterogeneous texture
+4. Mass effect on SMV/SMA
+5. Loss of normal lobulation
 
-Rate your suspicion (0-10) where:
-- 0-2: Normal appearance
-- 3-4: Mildly suspicious (recommend follow-up)
-- 5-6: Moderately suspicious (probable PDAC)
-- 7-10: Highly suspicious (definite PDAC features)
-
-Provide specific findings and confidence level."""
+Provide:
+- Suspicion level: NONE / LOW / MODERATE / HIGH
+- Key findings (bullet points)
+- Confidence: DEFINITE / PROBABLE / POSSIBLE / UNLIKELY"""
 )
 ```
 
----
-
-## Phase 3: Semantic Analysis (Agent Meta-Cognition)
-
-**Purpose:** Interpret VLM output using YOUR semantic understanding
-
-**NO Hard-Coded Weights:**
-Your clinical understanding of medical language IS the analysis framework.
+### Step 3: Semantic Assessment (Agent Meta-Cognition)
+**NO Hard-Coded Scoring**: Your understanding IS the assessment.
 
 **Instead of keyword counting:**
 ```python
 # ❌ DON'T DO THIS
 score = 0
-if "mass" in text: score += 1.0  # Rigid, misses context
+if "mass" in text: score += 1.0  # Rigid!
 ```
 
-**Use semantic judgment:**
+**Use holistic clinical judgment:**
 ```python
 # ✅ DO THIS
-Read VLM output holistically:
-- Does it describe concerning morphological features?
-- Are there mentions of mass effect or architectural distortion?
-- How confident is the language? ("possible" vs "definite")
-- Does it note hypo-attenuation in narrow window?
+Read VLM output and assess:
+- Does it describe concerning morphology?
+- How confident is the language? ("definite" vs "possible")
+- Are findings consistent across all 3 windows?
+- Does narrow window reveal what standard window hides?
 
-Your interpretation of these semantic cues IS the suspicion assessment.
+Your clinical reasoning IS the assessment.
 ```
 
-**Output Format:**
-```json
-{
-  "patient_id": "{PATIENT_ID}",
-  "vlm_assessment": {
-    "suspicion_level": "HIGH/MODERATE/LOW/NONE",
-    "confidence": "Your assessment of VLM confidence",
-    "key_findings": ["List of specific findings from VLM"],
-    "reasoning": "Why you classified it this way"
-  },
-  "raw_vlm_output": "..."
-}
-```
+### Step 4: Decision Matrix
 
-**Execution:**
-```bash
-conda run -n ChangHai python /skills/llava_med_analyzer/scripts/parse_suspicion.py \
-    --vlm-output "{VLM_OUTPUT_FILE}" \
-    --patient-id {PATIENT_ID} \
-    --output /workspace/sandbox/data/results/json/{PATIENT_ID}_suspicion_score.json
-```
+| nnU-Net | VLM Assessment | Conclusion | Action |
+|---------|----------------|------------|--------|
+| 0ml | NONE/LOW | True negative | Standard negative report |
+| 0ml | MODERATE/HIGH | **ENDOGENOUS_FALSE_NEGATIVE** | ⚠️ ESCALATE_TO_RADIOLOGIST |
+| >0ml | Consistent | Confirmed positive | Proceed to vascular topology |
+| >0ml | Contradicts | Discrepancy | Investigate segmentation quality |
 
----
+## 4. Error Handling
 
-## Phase 4: LLaVA-Med Report Generation
+| Error | Diagnosis | Action |
+|-------|-----------|--------|
+| Image not found | Tiled not generated | Go to master_slice_extractor |
+| VLM timeout | Image too large (>10MB) | Check file size, compress if needed |
+| Vague output | Poor image quality | Try different query or window settings |
 
-**Purpose:** Generate structured VLM analysis report
-
-**Execution Command:**
-```bash
-conda run -n ChangHai python /skills/llava_med_analyzer/scripts/generate_report.py \
-    --patient-id {PATIENT_ID} \
-    --suspicion-score {SCORE} \
-    --vlm-findings "{FINDINGS}" \
-    --output /workspace/sandbox/data/results/json/{PATIENT_ID}_llava_med_report.txt
-```
-
-**Expected Output Format:**
-```markdown
-# LLaVA-Med Visual Analysis Report
-
-## Patient Information
-- Patient ID: {PATIENT_ID}
-- Analysis Date: {timestamp}
-- Image: master_slice_tiled.png (Z={value})
-
-## Window Settings Analyzed
-1. Standard: C=40, W=400
-2. **Narrow: C=40, W=150** (Enhanced contrast)
-3. Soft Tissue: C=50, W=250
-
-## Suspicion Score
-**Total Score: {value}/10**
-
-Keywords Detected:
-- irregular (morphological, +0.8)
-- hypo-attenuating (morphological, +0.8)
-- mass effect (morphological, +0.8)
-- suspicious (suspicious, +0.6)
-...
-
-## Clinical Impression
-{VLM generated impression}
-
-## Findings Detail
-{VLM detailed findings}
-
-## Recommendation
-- If Score >= 1.5: Recommend immediate radiologist review
-- If Score < 1.5: Continue with standard protocol
-```
-
----
-
-## Output Files
-
-1. **VLM Analysis Report:**
-   - Path: `/workspace/sandbox/data/results/json/{PATIENT_ID}_llava_med_report.txt`
-
-2. **Suspicion Score JSON:**
-   - Path: `/workspace/sandbox/data/results/json/{PATIENT_ID}_suspicion_score.json`
-
-3. **Keywords Extracted:**
-   - Path: `/workspace/sandbox/data/results/json/{PATIENT_ID}_semantic_features.json`
-
----
-
-## CRITICAL: False Negative Detection
-
-**Conflict Detection (Agent Judgment):**
-
-| nnU-Net Result | VLM Assessment | Action |
-|----------------|----------------|--------|
-| 0 ml | Normal/Nonspecific | No conflict |
-| 0 ml | **Suspicious findings** | **ENDOGENOUS_FALSE_NEGATIVE** |
-| > 0 ml | Consistent with tumor | Consistent positive |
-| > 0 ml | Contradicts segmentation | Investigate discrepancy |
-
-**Your Role:**
-- Compare nnU-Net result with VLM semantic description
-- Use YOUR judgment: do they agree or conflict?
-- If VLM describes suspicious features but nnU-Net finds nothing → ESCALATE
-- No hard threshold. Your clinical reasoning IS the threshold.
-
-**CL-03356 Example:**
-```
-nnU-Net: 0 ml tumor
-VLM: "Irregular contour in pancreatic head with subtle hypo-attenuation
-      in narrow window, concerning for mass effect"
-Your judgment: VLM describes suspicious morphology despite nnU-Net negative
-Action: ENDOGENOUS_FALSE_NEGATIVE → ESCALATE_TO_RADIOLOGIST
-Root Cause: Desmoplastic reaction causing isodense appearance
-```
-
----
-
-## Quality Checkpoints
-
-- [ ] analyze_image tool executed successfully
+## 5. Success Criteria
+- [ ] Tiled image discovered and exists
+- [ ] analyze_image tool executed
 - [ ] VLM output contains specific findings
-- [ ] Semantic assessment completed using your judgment
-- [ ] Report generated with physical citations
-- [ ] If VLM suspicious AND nnU-Net=0, flag conflict
+- [ ] Semantic assessment completed using Agent judgment
+- [ ] Conflict flagged if VLM suspicious + nnU-Net 0ml
 
-**Citation Format:**
-- VLM analysis: `[Tool: LLaVA-Med, Model: v1.5-mistral-7b, Finding: {description}]`
-- Semantic assessment: `[Agent Assessment: {level}, Reasoning: {summary}]`
-
----
-
-## Error Handling
-
-**Common Issues:**
-
-1. **VLM timeout:**
-   - Image may be too large (>10MB)
-   - Retry with compressed image
-
-2. **Vague output:**
-   - Refine query to be more specific
-   - Ask for explicit suspicion score
-
-3. **No keywords detected:**
-   - Check VLM output quality
-   - May need manual review
-
-**Note:** LLaVA-Med may occasionally produce empty output due to model loading issues. If this occurs, use simplified rule-based scoring based on the presence of key terms in the raw output.
+## 6. Citation Format
+```
+[Tool: analyze_image, Image: {PATIENT_ID}_master_slice_tiled.png, VLM_Assessment: {level}, Key_Findings: {summary}]
+```

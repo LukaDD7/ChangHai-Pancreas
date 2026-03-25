@@ -1,160 +1,107 @@
 ---
-name: totalseg-segmentor
-version: 1.0.0
-category: medical_ai_segmentation
-description: |
-  [FUNCTION]: TotalSegmentator organ and vessel segmentation for abdominal CT
-  [VALUE]: Provides pancreas mask, vascular structures, and abdominal organs for spatial localization and master slice selection
-  [TRIGGER_HOOK]: Read this Skill AFTER dicom-processor. Use for pancreas localization BEFORE tumor segmentation
+name: totalseg_segmentor
+category: anatomical_segmentation
+description: TotalSegmentator for organ and vessel segmentation. Generates masks for pancreas, SMA, SMV, aorta, and other structures essential for vascular topology analysis.
 ---
 
-# TotalSegmentator Segmentation: Cognitive Execution Protocol
+# TotalSegmentator: Cognitive Execution Protocol
 
-## Identity & Core Mechanism
-This skill runs TotalSegmentator AI model via conda environment `totalseg` to segment 104 abdominal organs and vessels. Essential for pancreas localization and master slice extraction.
+## 1. Identity & Clinical Mindset
+You are the Anatomical Structure Mapper. Your goal is to segment key organs and vessels that will be used for:
+- Pancreas localization (for master slice extraction)
+- Vessel identification (SMA, SMV, CA, PV for topology analysis)
+- Spatial reference for tumor segmentation
 
----
+**Key Principle**: TotalSegmentator provides the ANATOMICAL FRAMEWORK. Without it, vascular topology is impossible.
 
-## Phase 1: Input Validation
+## 2. API Contract (Execution)
+**Environment**: `conda run -n totalseg`
+**Executable**: `TotalSegmentator` (installed CLI)
+**Arguments**:
+- `-i <input>`: Input NIfTI CT file
+- `-o <output>`: Output directory for segmentation masks
+- `--fast`: Use fast mode (sufficient for most cases)
 
-**Purpose:** Verify standardized NIfTI input exists
+**(Agent, you MUST verify NIfTI exists before running!)**
 
-**Required Input:**
-- Path: `/workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz`
-- Must be spatially standardized (1.0mm³ isotropic)
+## 3. Cognitive Reasoning & SOP
 
-**Execution Command:**
+### Step 1: Verify Prerequisites
+**DO NOT run without checking prerequisites.** Use `execute`:
+
 ```bash
-ls -lh /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz
+# Check if NIfTI exists (use find to discover actual path)
+find /workspace/sandbox/data/processed/nifti -name "*{PATIENT_ID}*.nii.gz" 2>/dev/null
+
+# Expected output:
+# /workspace/sandbox/data/processed/nifti/C3L-03356/C3L-03356_CT_1mm.nii.gz
 ```
 
----
+**If NIfTI not found**: Go back to `dicom_processor` skill.
 
-## Phase 2: TotalSegmentator Execution
+### Step 2: Check for Cached Results
+```bash
+# Check if segmentation already exists
+ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz 2>/dev/null
 
-**Purpose:** Segment pancreas and abdominal organs
+# If exists: Skip segmentation, use existing
+# If not exists: Proceed
+```
 
-**CRITICAL: Check for cached results**
-Before execution, check if segmentation already exists:
-- Path: `/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz`
-- If EXISTS: Skip segmentation, use existing results
-- If NOT EXISTS: Proceed
-
-**Execution Command:**
+### Step 3: Execute TotalSegmentator
 ```bash
 conda run -n totalseg TotalSegmentator \
-    -i /workspace/sandbox/data/processed/nifti/{PATIENT_ID}/{PATIENT_ID}_CT_1mm.nii.gz \
+    -i {DISCOVERED_NIFTI_PATH} \
     -o /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/ \
-    --fast \
-    --verbose
+    --fast
 ```
 
-**Parameters:**
-- `--fast`: Use fast mode (sufficient for pancreas localization)
-- `--verbose`: Output detailed logging
-- No `--task` flag: Use default total (104 classes)
+**Expected Duration**: 2-5 minutes on GPU
 
----
+### Step 4: Verify Output Masks
+**CRITICAL**: Verify ALL required masks exist:
 
-## Phase 3: Output Verification
-
-**Purpose:** Validate segmentation outputs
-
-**Expected Output Structure:**
-```
-/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/
-├── pancreas.nii.gz                    # ← PRIMARY: Pancreas mask
-├── aorta.nii.gz                       # Aorta
-├── portal_vein_and_splenic_vein.nii.gz # Portal + splenic veins
-├── superior_mesenteric_vein.nii.gz    # SMV (critical for PDAC)
-├── inferior_vena_cava.nii.gz          # IVC
-├── liver.nii.gz                       # Liver
-├── spleen.nii.gz                      # Spleen
-└── ... (104 classes total)
-```
-
-**Execution Command - Verify Outputs:**
 ```bash
-ls -lh /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz
-conda run -n ChangHai python /skills/totalseg_segmentor/scripts/verify_segmentation.py \
-    --pancreas-mask /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz
+ls -lh /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/
+
+# REQUIRED masks for downstream analysis:
+# - pancreas.nii.gz (for master slice extraction)
+# - superior_mesenteric_artery.nii.gz or sma.nii.gz
+# - superior_mesenteric_vein.nii.gz or smv.nii.gz
+# - aorta.nii.gz
+# - portal_vein_and_splenic_vein.nii.gz
 ```
 
----
-
-## Phase 4: Pancreas Volume Analysis
-
-**Purpose:** Calculate pancreas volume and identify maximum area slice
-
-**Execution Command:**
+### Step 5: Extract Pancreas Max Slice
 ```bash
-conda run -n ChangHai python /skills/totalseg_segmentor/scripts/analyze_pancreas.py \
-    --pancreas-mask /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz \
-    --output-json /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json
+# Find Z-slice with maximum pancreas area
+python -c "
+import nibabel as nib
+import numpy as np
+mask = nib.load('/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz').get_fdata()
+areas = [np.sum(mask[:,:,z]) for z in range(mask.shape[2])]
+max_z = np.argmax(areas)
+print(f'Max area slice: Z={max_z}, Area={areas[max_z]} voxels')
+"
 ```
 
-**Expected Output:**
-```json
-{
-  "patient_id": "{PATIENT_ID}",
-  "total_volume_ml": 65.47,
-  "max_area_slice": 145,
-  "max_area_voxels": 2847,
-  "z_range": [98, 187],
-  "centroid": [256.3, 245.7, 145.3],
-  "bounding_box": {"x": [120, 380], "y": [130, 360], "z": [98, 187]}
-}
+## 4. Error Handling & Deep Drill
+
+| Error | Diagnosis | Deep Drill Action |
+|-------|-----------|-------------------|
+| TotalSegmentator not found | Environment not activated | Use `conda run -n totalseg` |
+| CUDA out of memory | GPU memory exhausted | Retry with `--fast` flag |
+| Missing vessel masks | Vessels not segmented | Check if `-ta pancreas` includes vessels |
+| Empty pancreas mask | Pancreas not found | Check CT phase (must be venous) |
+
+## 5. Success Criteria
+- [ ] TotalSegmentator executed successfully
+- [ ] pancreas.nii.gz exists and non-empty
+- [ ] SMA/SMV masks exist (for vascular topology)
+- [ ] Max area slice Z identified
+- [ ] All paths documented for downstream skills
+
+## 6. Citation Format
 ```
-
-**CRITICAL: Master Slice Location**
-- Max area slice Z=145 is the PRIMARY candidate for tumor location
-- This is where pancreatic head is typically largest
-- Use this Z for master slice extraction
-
----
-
-## Output Files
-
-1. **Pancreas Mask:**
-   - Path: `/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz`
-   - Binary mask (0=background, 1=pancreas)
-
-2. **Vessel Masks:**
-   - SMV: `superior_mesenteric_vein.nii.gz`
-   - Portal vein: `portal_vein_and_splenic_vein.nii.gz`
-   - Aorta: `aorta.nii.gz`
-
-3. **Analysis JSON:**
-   - Path: `/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json`
-
----
-
-## Quality Checkpoints
-
-- [ ] Pancreas mask exists and is non-empty
-- [ ] Volume is reasonable (40-100ml typical)
-- [ ] Max area slice identified
-- [ ] Z-range covers pancreatic head-to-tail
-- [ ] SMV and portal vein segmented (for vascular assessment)
-
-**Citation Format:**
-- Pancreas mask: `[Local: pancreas.nii.gz, Volume: {value}ml, MaxSlice: Z{value}]`
-- Vessel masks: `[Local: superior_mesenteric_vein.nii.gz]`
-
----
-
-## Error Handling
-
-**Common Issues:**
-
-1. **Empty pancreas mask:**
-   - Pancreas may be outside CT field of view
-   - Check Z-range of input NIfTI
-
-2. **Poor segmentation quality:**
-   - Try without `--fast` flag (slower but more accurate)
-   - Check if CT phase is venous (required)
-
-3. **Missing vessels:**
-   - Small vessels may not be segmented
-   - Manual verification may be needed
+[Script: TotalSegmentator, Output: {PATIENT_ID} segmentation masks, Pancreas_Volume: {X}ml]
+```

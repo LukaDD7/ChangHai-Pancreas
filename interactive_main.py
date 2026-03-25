@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-ChangHai PDAC Agent - Interactive Main Entry (v1.0 Deep Agent Architecture)
+ChangHai PDAC Agent - Gene Reconstructed v2.0 (TianTan Essence Transplant)
+
+Core Mechanisms:
+1. Execution Audit Loop: All tool calls recorded to disk, citations validated
+2. Deep Drill Protocol: Automatic fallback on segmentation failure (0ml → VLM visual probe)
+3. Cognitive Skill Protocol: Agent MUST explore environment via ls/find before executing
 
 Architecture:
 - Single Agent flat architecture (NO Subagents)
-- Skills-based modular design for multi-modal medical AI
-- Dynamic module applicability judgment
-- CompositeBackend: FilesystemBackend + StoreBackend for persistence
-- Execute tool: Custom shell execution with conda environment switching
 - Evidence sovereignty: All measurements must have physical traceability
+- MDT Chief Agent with mandatory checkpoints for pancreatic cancer
 """
 
 import os
@@ -20,7 +22,8 @@ import re
 import subprocess
 import time
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass, asdict
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend, StoreBackend
@@ -29,7 +32,6 @@ from langgraph.store.memory import InMemoryStore
 from langchain.tools import tool
 
 from utils.llm_factory import get_pdac_client_langchain
-
 
 # =============================================================================
 # Configuration Constants
@@ -40,6 +42,7 @@ SKILLS_DIR = os.path.join(PROJECT_ROOT, "skills")
 SANDBOX_DIR = os.path.join(PROJECT_ROOT, "workspace", "sandbox")
 EXECUTION_LOGS_DIR = os.path.join(SANDBOX_DIR, "execution_logs")
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+AUDIT_LOG_PATH = os.path.join(SANDBOX_DIR, "execution_audit_log.txt")
 
 os.makedirs(SANDBOX_DIR, exist_ok=True)
 os.makedirs(EXECUTION_LOGS_DIR, exist_ok=True)
@@ -54,371 +57,367 @@ CONDA_ENVS = {
 }
 
 # =============================================================================
-# Global Execution Logger
+# Audit Record System (强审计闭环)
 # =============================================================================
 
-execution_logger: Optional['ExecutionLogger'] = None
+@dataclass
+class AuditRecord:
+    """Execution audit record - immutable evidence of tool invocation"""
+    timestamp: str
+    tool_name: str
+    command: str
+    arguments: Dict[str, Any]
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_ms: int
+    working_dir: str
+    patient_id: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+    def to_log_entry(self) -> str:
+        """Format as human-readable log entry"""
+        return f"""
+{'='*60}
+[{self.timestamp}] TOOL: {self.tool_name}
+COMMAND: {self.command}
+PATIENT: {self.patient_id or 'N/A'}
+DURATION: {self.duration_ms}ms | EXIT: {self.exit_code}
+WORKING_DIR: {self.working_dir}
+STDOUT: {self.stdout[:1000] if self.stdout else 'N/A'}
+STDERR: {self.stderr[:500] if self.stderr else 'N/A'}
+{'='*60}
+"""
 
 
-def get_logger() -> Optional['ExecutionLogger']:
-    """Get global execution logger"""
-    return execution_logger
+class ExecutionAuditor:
+    """
+    强审计闭环 (Execution Audit Loop)
 
-
-class ExecutionLogger:
-    """Complete execution history logger - Records all agent behaviors"""
+    Every tool execution is recorded to disk. Report submission validates
+    that all cited measurements actually appear in the audit log.
+    """
 
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.start_time = datetime.now()
-        self.log_entries: List[Dict[str, Any]] = []
-
-        self.main_log_path = os.path.join(
-            EXECUTION_LOGS_DIR,
-            f"session_{session_id}_complete.log"
+        self.records: List[AuditRecord] = []
+        self.audit_log_path = AUDIT_LOG_PATH
+        self.session_log_path = os.path.join(
+            EXECUTION_LOGS_DIR, f"session_{session_id}_audit.jsonl"
         )
-        self.json_log_path = os.path.join(
-            EXECUTION_LOGS_DIR,
-            f"session_{session_id}_structured.jsonl"
-        )
-        self.audit_log_path = os.path.join(SANDBOX_DIR, "execution_audit_log.txt")
 
-        self._write_header()
+        # Initialize audit log
+        self._init_audit_log()
 
-    def _write_header(self):
-        """Write log header"""
+    def _init_audit_log(self):
+        """Initialize audit log with header"""
         header = f"""
-{'='*80}
-ChangHai PDAC Agent - Complete Execution History
-Session ID: {self.session_id}
-Start Time: {self.start_time.isoformat()}
-{'='*80}
+{'#'*80}
+# ChangHai PDAC Agent - Execution Audit Log
+# Session ID: {self.session_id}
+# Start Time: {datetime.now().isoformat()}
+# Principle: All measurements must have physical traceability
+{'#'*80}
 
 """
-        with open(self.main_log_path, 'w', encoding='utf-8') as f:
+        with open(self.audit_log_path, 'w', encoding='utf-8') as f:
             f.write(header)
 
-    def _write_log(self, entry: Dict[str, Any]):
-        """Write single log entry"""
-        with open(self.json_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    def record(self, record: AuditRecord):
+        """Record execution to both audit log and session log"""
+        self.records.append(record)
 
-        readable_entry = self._format_readable(entry)
-        with open(self.main_log_path, 'a', encoding='utf-8') as f:
-            f.write(readable_entry + '\n')
+        # Append to main audit log (persistent across sessions)
+        with open(self.audit_log_path, 'a', encoding='utf-8') as f:
+            f.write(record.to_log_entry())
 
-    def _format_readable(self, entry: Dict[str, Any]) -> str:
-        """Format log entry to human-readable"""
-        timestamp = entry.get('timestamp', datetime.now().isoformat())
-        event_type = entry.get('type', 'unknown')
+        # Append to session JSONL (structured)
+        with open(self.session_log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record.to_dict(), ensure_ascii=False) + '\n')
 
-        formatted = f"\n{'─'*80}\n"
-        formatted += f"⏱️  {timestamp} | Type: {event_type}\n"
-        formatted += f"{'─'*80}\n"
+    def validate_citation(self, citation: str) -> Tuple[bool, str]:
+        """
+        Validate that a citation exists in audit log.
 
-        if event_type == 'user_input':
-            patient_id = entry.get('patient_id', 'N/A')
-            content = entry.get('content', '')
-            formatted += f"👤 User Input (Patient ID: {patient_id})\n"
-            formatted += f"   Content:\n{content}\n"
+        Returns (is_valid, error_message)
+        """
+        if not os.path.exists(self.audit_log_path):
+            return False, "❌ Audit log not found. No tool executions recorded."
 
-        elif event_type == 'tool_call':
-            tool_name = entry.get('tool_name', 'unknown')
-            arguments = entry.get('arguments', {})
-            result = entry.get('result')
-            duration = entry.get('duration_ms', 0)
-            formatted += f"⚙️  Tool Call: {tool_name}\n"
-            formatted += f"   Args: {json.dumps(arguments, ensure_ascii=False, indent=2)}\n"
-            formatted += f"   Duration: {duration}ms\n"
-            if result:
-                formatted += f"   Result: {str(result)[:500]}...\n"
+        with open(self.audit_log_path, 'r', encoding='utf-8') as f:
+            audit_content = f.read()
 
-        elif event_type == 'agent_thinking':
-            content = entry.get('content', '')
-            thinking_type = entry.get('thinking_type', 'general')
-            emoji = {'reasoning': '🧠', 'planning': '📋', 'decision': '⚖️', 'error': '❌',
-                     'system': '🔧', 'interrupt': '⏸️'}.get(thinking_type, '💭')
-            formatted += f"{emoji} Agent Thinking ({thinking_type}):\n{content}\n"
+        # Extract script/tool name from citation
+        # Format: [Script: name.py, Output: ...] or [Tool: name, ...]
+        script_match = re.search(r'\[Script:\s*([^,\]]+)', citation)
+        tool_match = re.search(r'\[Tool:\s*([^,\]]+)', citation)
 
-        elif event_type == 'skill_execution':
-            skill_name = entry.get('skill_name', 'unknown')
-            status = entry.get('status', 'unknown')
-            formatted += f"📚 Skill Execution: {skill_name} ({status})\n"
+        if script_match:
+            script_name = script_match.group(1).strip()
+            if script_name not in audit_content:
+                return False, f"❌ Citation validation FAILED: Script '{script_name}' not found in execution audit log. You must execute the script before citing it."
 
-        return formatted
+        if tool_match:
+            tool_name = tool_match.group(1).strip()
+            if tool_name not in audit_content:
+                return False, f"❌ Citation validation FAILED: Tool '{tool_name}' not found in execution audit log."
 
-    def log_user_input(self, content: str, patient_id: Optional[str] = None):
-        """Log user input"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "type": "user_input",
-            "patient_id": patient_id,
-            "content": content,
-            "content_length": len(content)
-        }
-        self._write_log(entry)
+        return True, "✅ Citation validated against execution audit log."
 
-    def log_tool_call(self, tool_name: str, arguments: Dict, result: Any, duration_ms: int):
-        """Log tool call"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "type": "tool_call",
-            "tool_name": tool_name,
-            "arguments": arguments,
-            "result": result,
-            "duration_ms": duration_ms
-        }
-        self._write_log(entry)
+    def get_patient_executions(self, patient_id: str) -> List[AuditRecord]:
+        """Get all executions for a specific patient"""
+        return [r for r in self.records if r.patient_id == patient_id]
 
-    def log_agent_thinking(self, content: str, thinking_type: str = "general"):
-        """Log agent thinking"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "type": "agent_thinking",
-            "content": content,
-            "thinking_type": thinking_type
-        }
-        self._write_log(entry)
+    def has_script_executed(self, script_name: str) -> bool:
+        """Check if a script has been executed"""
+        return any(script_name in r.command for r in self.records)
 
-    def log_skill_execution(self, skill_name: str, status: str, details: Dict = None):
-        """Log skill execution"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "type": "skill_execution",
-            "skill_name": skill_name,
-            "status": status,
-            "details": details or {}
-        }
-        self._write_log(entry)
 
-    def log_error(self, message: str, error_type: str = "runtime_error", traceback_info: str = ""):
-        """Log error"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "type": "error",
-            "message": message,
-            "error_type": error_type,
-            "traceback": traceback_info
-        }
-        self._write_log(entry)
+# Global auditor instance
+_auditor: Optional[ExecutionAuditor] = None
+
+
+def get_auditor() -> ExecutionAuditor:
+    """Get global auditor instance"""
+    if _auditor is None:
+        raise RuntimeError("Auditor not initialized. Call init_auditor() first.")
+    return _auditor
+
+
+def init_auditor(session_id: str):
+    """Initialize global auditor"""
+    global _auditor
+    _auditor = ExecutionAuditor(session_id)
 
 
 # =============================================================================
-# Initialize Model
+# L3 System Prompt (Pancreatic Cancer Specific)
 # =============================================================================
 
-try:
-    print("🧠 Connecting to PDAC Medical Brain (Deep Thinking Mode)...")
-    model = get_pdac_client_langchain()
-except Exception as e:
-    print(f"❌ Brain initialization failed: {e}")
-    sys.exit(1)
-
-
-# =============================================================================
-# L3 Master Control System Prompt (Agent Autonomy Architecture)
-# =============================================================================
-
-L3_SYSTEM_PROMPT = """You are a Pancreatic Ductal Adenocarcinoma (PDAC) MDT Chief Agent - an autonomous medical AI with meta-cognitive capabilities.
+L3_SYSTEM_PROMPT = """You are the ChangHai PDAC MDT Chief Agent - an autonomous AI surgeon for Pancreatic Ductal Adenocarcinoma.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ AGENT AUTONOMY PRINCIPLES (Meta-Cognitive)
+■ PRIME DIRECTIVES (The TianTan Essence)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-**NEVER encode workflows into your reasoning.** You are not a state machine. You are an intelligent agent.
 
-1. **SELF-DIRECTED DISCOVERY**:
-   - You have 7 Skills mounted in `/skills/`. Each Skill's SKILL.md contains its own reasoning.
-   - When facing a task, FIRST read the relevant SKILL.md using read_file tool.
-   - UNDERSTAND the skill's purpose, inputs, outputs - not just execute commands.
-   - DECIDE yourself which skills to use, in what order, based on clinical context.
+1. **COGNITIVE SKILL PROTOCOL** (认知型技能):
+   - You are NOT a script executor. You are a CLINICAL REASONER.
+   - Before executing ANY skill, you MUST:
+     a) Use `execute` with `ls`, `find`, or `cat` to EXPLORE the data environment
+     b) DISCOVER the actual file paths (don't assume!)
+     c) READ the SKILL.md using `read_file` to understand the clinical reasoning
+     d) ASSEMBLE the command based on discovered paths
+   - Example: Instead of assuming `/workspace/sandbox/data/nifti/C3L-03348.nii.gz`,
+     you MUST first run `find /workspace/sandbox -name "*.nii.gz"` to locate it.
 
-2. **NO HARD-CODED WORKFLOWS**:
-   - There are NO "mandatory checkpoints" or "phases" you must follow.
-   - Your reasoning should adapt to each patient's unique situation.
-   - Skip skills if clinically irrelevant. Add steps if clinically necessary.
+2. **DEEP DRILL PROTOCOL** (深钻探针):
+   - When nnU-Net returns tumor volume = 0ml, you MUST NOT conclude "no tumor"!
+   - This is likely an isodense tumor (desmoplastic PDAC) invisible to HU-threshold methods.
+   - You MUST trigger Deep Drill:
+     a) Invoke `master_slice_extractor` to generate multi-window Tiled image
+     b) Use `analyze_image` with LLaVA-Med to visually confirm
+     c) If VLM reports suspicious morphology → ENDOGENOUS_FALSE_NEGATIVE
+   - Failure to trigger Deep Drill on 0ml result is a CRITICAL ERROR.
 
-3. **EVIDENCE SOVEREIGNTY**:
-   - NEVER fabricate tumor volumes, HU values, coordinates.
-   - All measurements MUST be obtained through actual script execution.
-   - Citation format: [Script: <name>, Output: <value>] or [Local: <file>, Line: <n>]
+3. **EXECUTION AUDIT LOOP** (强审计闭环):
+   - Every `execute` call is recorded to `execution_audit_log.txt`
+   - Before submitting report via `submit_mdt_report`, citations are VALIDATED
+   - Any claim without corresponding audit record will REJECT the submission
+   - Citation format: [Script: name.py, Output: value] or [Tool: name, Output: value]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ META-THINKING: CONFLICT DETECTION
+■ MANDATORY CHECKPOINTS (治疗决策强制检查点)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-**Do NOT use hard-coded keyword weights.** Your semantic understanding IS the weight.
 
-Instead of:
+**YOU MUST answer ALL checkpoints before generating MDT report:**
+
+### Checkpoint 1: Environmental Awareness (环境感知)
+- [ ] Use `execute` with `ls` and `find` to locate patient's DICOM/NIfTI files
+- [ ] Verify TotalSegmentator masks exist (pancreas.nii.gz, SMA.nii.gz, SMV.nii.gz)
+- [ ] Confirm coordinate system alignment (all files in same 1.0mm³ isotropic space)
+- [ ] Document discovered paths in your reasoning
+
+### Checkpoint 2: Tumor Quantification (肿瘤定量)
+- [ ] Execute nnU-Net segmentation
+- [ ] **CRITICAL**: If volume = 0ml → TRIGGER DEEP DRILL (multi-window + VLM)
+- [ ] If volume > 0ml → Record exact volume with physical traceability
+- [ ] Citation: [Script: analyze_tumor.py, Output: Volume {X}ml]
+
+### Checkpoint 3: Vascular Topology (血管拓扑)
+- [ ] Calculate wrapping angles: SMA, SMV, Celiac Artery (CA), Main Portal Vein (MPV)
+- [ ] Classify per NCCN guidelines:
+  - Resectable: No arterial involvement, clear fat plane
+  - Borderline: <180° SMA/CA involvement, or reconstructible SMV/PV
+  - Unresectable: >180° SMA/CA encasement, or occluded SMV/PV
+- [ ] Citation: [Script: vascular_topology.py, Output: SMA {X}°, SMV {Y}°]
+
+### Checkpoint 4: Cognitive Dissonance Detection (认知失调)
+- [ ] Compare: nnU-Net result vs VLM visual assessment
+- [ ] If CONFLICT (0ml but VLM suspicious) → Add warning to report:
+  "⚠️ COGNITIVE DISSONANCE WARNING: Segmentation negative but visual findings suspicious.
+   Recommend manual radiologist review."
+- [ ] Document root cause: likely desmoplastic isodense tumor
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+■ ANTI-HALLUCINATION PROTOCOLS (严禁硬编码)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**STRICTLY FORBIDDEN:**
+- ❌ Assuming file paths (e.g., "/data/C3L-03348.nii.gz")
+- ❌ Fabricating measurements (e.g., "tumor volume is 5.2ml")
+- ❌ Skipping Deep Drill on 0ml segmentation results
+- ❌ Submitting reports without validating citations
+
+**REQUIRED:**
+- ✅ Use `ls` and `find` to discover actual paths
+- ✅ Execute scripts and cite [Script: name, Output: value]
+- ✅ Trigger Deep Drill on segmentation failure
+- ✅ Validate all citations before submission
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+■ CLINICAL DECISION MATRIX
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Resectability Criteria (NCCN Guidelines):**
+
+| Vessel | Resectable | Borderline | Unresectable |
+|--------|-----------|------------|--------------|
+| SMA | No contact | <180° | ≥180° or occlusion |
+| SMV | Patent | Narrowed/Reconstructible | Occluded (no reconstruction) |
+| CA | Clear plane | Abutment | Encasement |
+
+**Multi-Window Strategy for Isodense Tumors:**
+- Standard (W:400): General anatomy
+- **Narrow (W:150)**: ⭐ Isodense detection (20 HU → 34 gray levels)
+- Soft (W:250): Boundary definition
+
+**Deep Drill Trigger:**
 ```
-if "mass" in text: score += 1.0  # ❌ Hard-coded
-if "irregular" in text: score += 0.8  # ❌ Rigid
+IF nnU-Net_Volume == 0ml:
+    TRIGGER DeepDrill:
+        1. master_slice_extractor (generate Tiled image)
+        2. analyze_image (VLM visual confirmation)
+        3. IF VLM suspicious: FLAG ENDOGENOUS_FALSE_NEGATIVE
 ```
-
-Think like this:
-```
-"The VLM described 'subtle contour irregularity in the pancreatic head with
-hypo-attenuation relative to surrounding parenchyma' - this is clinically
-suspicious for malignancy despite the formal segmentation showing no lesion."
-# Your understanding of medical language IS the judgment.
-```
-
-**Conflict Detection (Endogenous)**:
-- Compare: nnU-Net segmentation result vs VLM semantic analysis
-- If they disagree (e.g., nnU-Net says "no tumor" but VLM reports suspicious findings)
-- THEN: Detect ENDOGENOUS_FALSE_NEGATIVE
-- ACTION: ESCALATE_TO_RADIOLOGIST
-- No threshold. No formula. Your clinical judgment.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ SKILL INVENTORY (Your Capabilities)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-You have access to these skills - USE AS NEEDED, NOT SEQUENTIALLY:
-
-| Skill | Purpose | When to Use |
-|-------|---------|-------------|
-| dicom_processor | DICOM→NIfTI conversion | New patient, raw data |
-| totalseg_segmentor | Organ/vessel segmentation | Need anatomy reference |
-| nnunet_segmentor | Tumor segmentation | Primary detection task |
-| master_slice_extractor | Multi-window tiled images | Need VLM visual analysis |
-| llava_med_analyzer | VLM image analysis | Semantic interpretation |
-| adw_ceo_reporter | Conflict detection & reporting | Disagreement between models |
-| vascular_topology | Resectability assessment | Surgical planning |
-
-**YOU decide the order. YOU decide which to skip. YOU decide when to loop back.**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ MULTI-WINDOW STRATEGY (For Isodense Tumors)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PDAC tumors are often isodense (same HU as normal pancreas) - invisible in standard window.
-
-**Window Settings** (implemented via pixel value transformation):
-- Standard: Center 40, Width 400 (HU range: -160 to 240)
-- **Narrow**: Center 40, Width 150 (HU range: -35 to 115) ⭐ Isodense detection
-- Soft Tissue: Center 50, Width 250 (HU range: -75 to 175)
-
-**Implementation**: The master_slice_extractor script applies these window transforms:
-```python
-# Pseudo-code for window transform
-windowed = (raw_hu - center) / width * 255 + 128
-windowed = np.clip(windowed, 0, 255)
-```
-
-**Output**: Tiled image (1536×512) - 3 windows side by side for VLM comparison.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ PHYSICAL TRACEABILITY CITATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Measurement: [Script: <script_name>, Output: <value>]
-- Image: [Local: <filename>, Visual: Slice Z<value>]
-- Segmentation: [Tool: <tool_name>, Volume: <value>ml]
-- VLM Analysis: [Tool: LLaVA-Med, Finding: <description>]
-- **NEVER cite non-existent scripts!**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ MEMORY PROTOCOL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ NEVER read `/memories/personas/` before report generation - avoid stale data.
-
-- Read current patient data via execute tool (real-time)
-- Write persona AFTER report (for future reference only)
-- Clinical principles in `/memories/principles/` can be read/written anytime
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-■ REPORT SUBMISSION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Use `submit_pdac_report` tool when complete. Tool validates citations against execution log.
 """
 
 
 # =============================================================================
-# Custom Tools
+# Core Tools (四大核心工具)
 # =============================================================================
 
 @tool
-def analyze_image(image_path: str, query: str = "Analyze this CT image and describe any abnormalities.") -> str:
-    """Analyze a CT/Medical image using VLM (Vision-Language Model).
+def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) -> str:
+    """
+    Execute a shell command with mandatory audit logging.
 
-    Use this tool when you need to:
-    - Extract information from CT slices (tumor detection, vessel relationships)
-    - Analyze complex medical images that are unclear in text format
-    - Verify segmentation results against original images
+    **COGNITIVE PROTOCOL**: Use this to EXPLORE the environment before deciding actions.
+    - Use `ls`, `find` to discover file locations
+    - Use `cat`, `grep` to inspect file contents
+    - Use `conda run -n <env>` to execute Python scripts
+
+    **SECURITY**: Only whitelisted commands allowed:
+    - ls, cat, head, tail, grep, find, wc, awk, sed
+    - python, python3, conda run -n
 
     Args:
-        image_path: Path to the image file (e.g., /workspace/sandbox/patients/CL-03356/master_slice_tiled.png)
-        query: Specific question for VLM analysis (default: general tumor detection)
+        command: Shell command to execute
+        timeout: Maximum execution time in seconds
+        patient_id: Associated patient ID for audit tracking
 
     Returns:
-        VLM analysis result with extracted findings
+        Command output (JSON with stdout, stderr, exit_code)
     """
-    import base64
-    import os
+    import subprocess
+    import time
+
+    start_time = time.time()
+
+    # Whitelist for security
+    ALLOWED_PREFIXES = (
+        "ls ", "cat ", "head ", "tail ", "grep ", "find ", "wc ",
+        "echo ", "mkdir ", "pwd", "cd ", "diff ",
+        "sort ", "uniq ", "awk ", "sed ", "python ", "python3 ",
+        "conda run -n ",
+    )
+
+    DANGEROUS_PATTERNS = (
+        "rm -rf", "dd if=", "mkfs.", "> /dev/sda",
+        "curl", "wget", "ssh", "nc -l", ":(){:|:&};:",
+    )
+
+    is_allowed = any(command.strip().startswith(prefix) for prefix in ALLOWED_PREFIXES)
+    is_dangerous = any(pattern in command.lower() for pattern in DANGEROUS_PATTERNS)
+
+    if is_dangerous:
+        error_msg = f"❌ BLOCKED: Dangerous command detected"
+        return json.dumps({"error": error_msg, "command": command[:50]})
+
+    if not is_allowed:
+        error_msg = f"❌ BLOCKED: Command not in whitelist. Allowed: ls, cat, find, python, conda run"
+        return json.dumps({"error": error_msg, "command": command[:50]})
 
     try:
-        actual_path = image_path
-        if image_path.startswith("/workspace/sandbox/"):
-            relative = image_path[len("/workspace/sandbox/"):]
-            actual_path = os.path.join(SANDBOX_DIR, relative)
-
-        if not os.path.exists(actual_path):
-            return f"Error: Image not found: {image_path}"
-
-        file_size = os.path.getsize(actual_path)
-        if file_size > 10 * 1024 * 1024:
-            return f"Error: Image too large ({file_size / 1024 / 1024:.2f}MB > 10MB limit)"
-
-        with open(actual_path, "rb") as f:
-            base64_image = base64.b64encode(f.read()).decode("utf-8")
-
-        ext = os.path.splitext(actual_path)[1].lower()
-        mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else "image/jpeg"
-
-        from utils.llm_factory import get_vlm_client
-        client = get_vlm_client()
-
-        completion = client.chat.completions.create(
-            model="qwen3.5-plus",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}},
-                    {"type": "text", "text": query}
-                ]
-            }]
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=SANDBOX_DIR,
         )
 
-        result = completion.choices[0].message.content
+        duration_ms = int((time.time() - start_time) * 1000)
 
-        if get_logger():
-            get_logger().log_tool_call(
-                "analyze_image",
-                {"image_path": image_path, "query": query[:100]},
-                {"result_length": len(result), "image_size": file_size},
-                0
-            )
+        # Create audit record
+        record = AuditRecord(
+            timestamp=datetime.now().isoformat(),
+            tool_name="execute",
+            command=command,
+            arguments={"timeout": timeout, "patient_id": patient_id},
+            exit_code=result.returncode,
+            stdout=result.stdout[:5000],
+            stderr=result.stderr[:2000] if result.stderr else "",
+            duration_ms=duration_ms,
+            working_dir=SANDBOX_DIR,
+            patient_id=patient_id
+        )
 
-        return f"""✅ VLM Analysis Complete
+        # Record to audit log
+        if _auditor:
+            _auditor.record(record)
 
-📁 Image: {image_path}
-📏 Size: {file_size / 1024:.1f} KB
-❓ Query: {query}
+        output_data = {
+            "exit_code": result.returncode,
+            "stdout": result.stdout[:5000],
+            "stderr": result.stderr[:2000] if result.stderr else "",
+            "duration_ms": duration_ms,
+            "command": command,
+        }
 
-🔍 Result:
-{result}
-"""
+        return json.dumps(output_data, ensure_ascii=False, indent=2)
+
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": f"Timeout after {timeout}s", "command": command})
     except Exception as e:
-        error_msg = f"Error analyzing image: {str(e)}"
-        if get_logger():
-            get_logger().log_error(error_msg, "image_analysis_error")
-        return error_msg
+        return json.dumps({"error": str(e), "command": command})
 
 
 @tool
 def read_file(path: str, limit: int = 2000, offset: int = 0) -> str:
-    """Read a file from the filesystem. Supports virtual paths like /skills/ and /memories/.
+    """
+    Read a file from the filesystem. Supports virtual paths.
+
+    **COGNITIVE PROTOCOL**: Use this to READ SKILL.md files before executing.
+    - `/skills/<skill_name>/SKILL.md` - Read skill protocols
+    - `/workspace/sandbox/data/...` - Read data files
 
     Args:
-        path: File path (can be virtual path like /skills/dicom_processor/SKILL.md)
-        limit: Maximum number of lines to read (default 2000)
-        offset: Line offset to start reading from (default 0)
+        path: File path (supports virtual paths like /skills/...)
+        limit: Maximum lines to read
+        offset: Starting line offset
 
     Returns:
         File content with line numbers
@@ -429,212 +428,239 @@ def read_file(path: str, limit: int = 2000, offset: int = 0) -> str:
         if path.startswith("/skills/"):
             relative = path[len("/skills/"):]
             actual_path = os.path.join(SKILLS_DIR, relative)
-        elif path.startswith("/memories/"):
-            relative = path[len("/memories/"):]
-            actual_path = os.path.join(SANDBOX_DIR, "memories", relative)
         elif path.startswith("/workspace/sandbox/"):
             relative = path[len("/workspace/sandbox/"):]
             actual_path = os.path.join(SANDBOX_DIR, relative)
+        elif path.startswith("/memories/"):
+            relative = path[len("/memories/"):]
+            actual_path = os.path.join(SANDBOX_DIR, "memories", relative)
 
         if not os.path.exists(actual_path):
-            return f"Error: File not found: {path}"
+            return f"❌ File not found: {path}\n💡 TIP: Use `execute` with `find` to locate the file first."
 
         with open(actual_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
         start = offset
-        end = offset + limit if limit > 0 else len(lines)
-        selected_lines = lines[start:end]
+        end = min(offset + limit, len(lines))
+        selected = lines[start:end]
 
         result = []
-        for i, line in enumerate(selected_lines, start=start + 1):
+        for i, line in enumerate(selected, start=start + 1):
             result.append(f"{i:4d} | {line}")
 
         output = ''.join(result)
 
-        if get_logger():
-            get_logger().log_tool_call(
-                "read_file",
-                {"path": path, "limit": limit, "offset": offset},
-                {"content_length": len(output), "actual_path": actual_path},
-                0
-            )
-
         if len(lines) > end:
             output += f"\n... ({len(lines) - end} more lines)"
+
+        # Log to audit
+        if _auditor:
+            record = AuditRecord(
+                timestamp=datetime.now().isoformat(),
+                tool_name="read_file",
+                command=f"read_file({path})",
+                arguments={"path": path, "limit": limit, "offset": offset},
+                exit_code=0,
+                stdout=f"Read {len(selected)} lines",
+                stderr="",
+                duration_ms=0,
+                working_dir=SANDBOX_DIR
+            )
+            _auditor.record(record)
 
         return output
 
     except Exception as e:
-        error_msg = f"Error reading file {path}: {str(e)}"
-        if get_logger():
-            get_logger().log_error(error_msg, "file_read_error")
-        return error_msg
+        return f"❌ Error reading file: {str(e)}"
 
 
 @tool
-def execute(command: str, timeout: int = 600, max_output_bytes: int = 100000) -> str:
-    """Execute a shell command and return the output. Supports conda environment switching.
+def analyze_image(image_path: str, query: str, patient_id: Optional[str] = None) -> str:
+    """
+    Analyze medical image using Vision-Language Model (LLaVA-Med/Qwen-VL).
+
+    **DEEP DRILL PROTOCOL**: Use this when:
+    - nnU-Net returns 0ml (suspect isodense tumor)
+    - Need visual confirmation of segmentation results
+    - Need qualitative assessment of tumor morphology
 
     Args:
-        command: The shell command to execute
-        timeout: Maximum execution time in seconds (default: 600)
-        max_output_bytes: Maximum output size in bytes (default: 100000)
+        image_path: Path to image file
+        query: Specific question for VLM analysis
+        patient_id: Patient ID for audit tracking
 
     Returns:
-        Command output (stdout + stderr) or error message
+        VLM analysis result
     """
-    import subprocess
-    import time
-
-    start_time = time.time()
-
-    # Whitelist for security
-    ALLOWED_PREFIXES = (
-        "ls ", "cat ", "head ", "tail ", "grep ", "find .",
-        "echo ", "mkdir ", "pwd", "cd ", "wc ", "diff ",
-        "sort ", "uniq ", "awk ", "sed ", "python ", "python3 ",
-        "conda run -n ",  # Allow conda environment switching
-    )
-
-    DANGEROUS_PATTERNS = (
-        "rm -rf", "rm -rf /", "dd if=", "mkfs.", "> /dev/sda",
-        "curl", "wget", "ssh", "nc ",
-    )
-
-    is_allowed = any(command.strip().startswith(prefix) for prefix in ALLOWED_PREFIXES)
-    is_dangerous = any(pattern in command.lower() for pattern in DANGEROUS_PATTERNS)
-
-    if is_dangerous:
-        error_msg = f"Error: Command blocked by security policy: {command[:100]}"
-        if get_logger():
-            get_logger().log_tool_call("execute", {"command": command}, {"error": error_msg}, 0)
-        return error_msg
-
-    if not is_allowed:
-        error_msg = f"Error: Command not in whitelist: {command[:100]}"
-        if get_logger():
-            get_logger().log_tool_call("execute", {"command": command}, {"error": error_msg}, 0)
-        return error_msg
+    import base64
 
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=SANDBOX_DIR,
-            env={**os.environ, "SANDBOX_ROOT": SANDBOX_DIR}
+        actual_path = image_path
+        if image_path.startswith("/workspace/sandbox/"):
+            relative = image_path[len("/workspace/sandbox/"):]
+            actual_path = os.path.join(SANDBOX_DIR, relative)
+
+        if not os.path.exists(actual_path):
+            return f"❌ Image not found: {image_path}\n💡 TIP: Use `execute` with `find` to locate image files."
+
+        file_size = os.path.getsize(actual_path)
+        if file_size > 10 * 1024 * 1024:
+            return f"❌ Image too large ({file_size/1024/1024:.1f}MB > 10MB limit)"
+
+        with open(actual_path, "rb") as f:
+            base64_image = base64.b64encode(f.read()).decode("utf-8")
+
+        ext = os.path.splitext(actual_path)[1].lower()
+        mime_type = "image/png" if ext == ".png" else "image/jpeg"
+
+        from utils.llm_factory import get_vlm_client
+        client = get_vlm_client()
+
+        start_time = time.time()
+        completion = client.chat.completions.create(
+            model="qwen-vl-plus",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}},
+                    {"type": "text", "text": query}
+                ]
+            }]
         )
-
-        output = result.stdout
-        if result.stderr:
-            output += "\n[stderr]\n" + result.stderr
-
-        if len(output.encode('utf-8')) > max_output_bytes:
-            output = output[:max_output_bytes] + "\n... [output truncated]"
-
         duration_ms = int((time.time() - start_time) * 1000)
 
-        result_dict = {
-            "exit_code": result.returncode,
-            "stdout": result.stdout[:5000],
-            "stderr": result.stderr[:2000] if result.stderr else "",
-            "current_working_dir": SANDBOX_DIR,
-        }
+        result = completion.choices[0].message.content
 
-        if get_logger():
-            get_logger().log_tool_call("execute", {"command": command}, result_dict, duration_ms)
+        # Log to audit
+        if _auditor:
+            record = AuditRecord(
+                timestamp=datetime.now().isoformat(),
+                tool_name="analyze_image",
+                command=f"analyze_image({image_path})",
+                arguments={"image_path": image_path, "query": query[:100], "patient_id": patient_id},
+                exit_code=0,
+                stdout=result[:2000],
+                stderr="",
+                duration_ms=duration_ms,
+                working_dir=SANDBOX_DIR,
+                patient_id=patient_id
+            )
+            _auditor.record(record)
 
-        # Audit log
-        audit_log_path = os.path.join(SANDBOX_DIR, "execution_audit_log.txt")
-        with open(audit_log_path, "a", encoding="utf-8") as f:
-            f.write(f"\n{'='*40}\n")
-            f.write(f"TIME: {datetime.now().isoformat()}\n")
-            f.write(f"COMMAND: {command}\n")
-            f.write(f"DURATION: {duration_ms}ms\n")
-            f.write(f"EXIT_CODE: {result.returncode}\n")
-            f.write(f"OUTPUT:\n{output[:2000]}\n")
+        return f"""✅ VLM Analysis Complete
 
-        return json.dumps(result_dict, ensure_ascii=False, indent=2)
+📁 Image: {image_path}
+📏 Size: {file_size/1024:.1f} KB
+⏱️  Duration: {duration_ms}ms
 
-    except subprocess.TimeoutExpired:
-        return f"Error: Command timed out after {timeout} seconds"
+🔍 VLM Result:
+{result}
+"""
+
     except Exception as e:
-        return f"Error executing command: {str(e)}"
+        return f"❌ VLM Analysis Failed: {str(e)}"
 
 
 @tool
-def submit_pdac_report(patient_id: str, report_content: str) -> str:
-    """Submit the PDAC analysis report with citation validation.
+def submit_mdt_report(patient_id: str, report_content: str) -> str:
+    """
+    Submit MDT (Multi-Disciplinary Team) report with mandatory citation validation.
 
-    This tool will:
-    1. Validate all citations in the report against execution audit log
-    2. Block any fabricated citations
-    3. Only save the report if validation passes
+    **EXECUTION AUDIT LOOP**: This tool will:
+    1. Parse all citations from report (format: [Script: ..., Output: ...])
+    2. Validate each citation against execution_audit_log.txt
+    3. REJECT submission if any citation lacks audit record
+    4. Save report only if validation passes
 
     Args:
-        patient_id: Patient identifier (e.g., CL-03356)
-        report_content: The complete PDAC analysis report
+        patient_id: Patient identifier (e.g., C3L-03356)
+        report_content: Complete MDT report with citations
 
     Returns:
-        Submission result message
+        Submission result (success or rejection with reasons)
     """
     import time
     start_time = time.time()
 
-    if get_logger():
-        get_logger().log_tool_call("submit_pdac_report", {"patient_id": patient_id}, None, 0)
+    # Step 1: Extract citations
+    citation_pattern = r'\[(Script|Tool):\s*([^,\]]+)',
+    citations = re.findall(citation_pattern, report_content)
 
-    # Citation validation
-    is_valid, msg = validate_citations(report_content)
-    if not is_valid:
-        if get_logger():
-            get_logger().log_error(f"Citation validation failed: {msg}", "citation_validation")
-        return msg
+    validation_results = []
+    all_valid = True
 
-    # Save report
+    # Step 2: Validate each citation
+    for cit_type, cit_value in citations:
+        full_citation = f"[{cit_type}: {cit_value}]"
+        is_valid, msg = get_auditor().validate_citation(full_citation)
+        validation_results.append(f"{full_citation}: {'✅' if is_valid else '❌'} {msg}")
+        if not is_valid:
+            all_valid = False
+
+    # Step 3: Check mandatory checkpoints
+    checkpoint_errors = []
+
+    # Check for tumor volume citation
+    if "Volume" in report_content and "[Script:" not in report_content:
+        checkpoint_errors.append("❌ Tumor volume mentioned but no script execution cited")
+
+    # Check for angle measurements
+    if any(v in report_content for v in ["SMA", "SMV", "Celiac"]) and "[Script:" not in report_content:
+        checkpoint_errors.append("❌ Vessel angles mentioned but no script execution cited")
+
+    # Step 4: Reject or Accept
+    if not all_valid or checkpoint_errors:
+        error_report = "\n".join(validation_results + checkpoint_errors)
+        return f"""❌ REPORT SUBMISSION REJECTED
+
+CITATION VALIDATION FAILED:
+{error_report}
+
+📋 REQUIRED ACTIONS:
+1. Execute scripts using `execute` tool before citing them
+2. Use format: [Script: script_name.py, Output: value]
+3. Ensure all measurements have physical traceability
+
+💡 Tip: Use `execute` with `ls` and `find` to locate data files first.
+"""
+
+    # Step 5: Save report
     patient_dir = os.path.join(SANDBOX_DIR, "patients", patient_id, "reports")
     os.makedirs(patient_dir, exist_ok=True)
 
-    file_path = os.path.join(patient_dir, f"PDAC_Report_{patient_id}.md")
-    with open(file_path, "w", encoding="utf-8") as f:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = os.path.join(patient_dir, f"MDT_Report_{patient_id}_{timestamp}.md")
+
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_content)
 
     duration_ms = int((time.time() - start_time) * 1000)
 
-    result_msg = f"✅ PDAC REPORT SUBMITTED! Saved to {file_path}"
-    if get_logger():
-        get_logger().log_tool_call("submit_pdac_report", {"patient_id": patient_id}, {"status": "success", "file_path": file_path}, duration_ms)
+    # Log to audit
+    record = AuditRecord(
+        timestamp=datetime.now().isoformat(),
+        tool_name="submit_mdt_report",
+        command=f"submit_mdt_report({patient_id})",
+        arguments={"patient_id": patient_id, "citations_count": len(citations)},
+        exit_code=0,
+        stdout=f"Report saved to {report_path}",
+        stderr="",
+        duration_ms=duration_ms,
+        working_dir=SANDBOX_DIR,
+        patient_id=patient_id
+    )
+    get_auditor().record(record)
 
-    return result_msg
+    return f"""✅ MDT REPORT SUBMITTED SUCCESSFULLY
 
+📁 Patient: {patient_id}
+📄 Report: {report_path}
+⏱️  Duration: {duration_ms}ms
+📊 Citations Validated: {len(citations)}
 
-def validate_citations(report_content: str) -> tuple:
-    """Validate citations in report"""
-    import re
-
-    audit_log_path = os.path.join(SANDBOX_DIR, "execution_audit_log.txt")
-
-    if not os.path.exists(audit_log_path):
-        return False, "❌ No execution audit log found. You must execute commands before citing."
-
-    with open(audit_log_path, "r", encoding="utf-8") as f:
-        audit_content = f.read()
-
-    # Check for citations
-    citations = {
-        'script': re.findall(r'\[Script: ([^\]]+)', report_content),
-        'tool': re.findall(r'\[Tool: ([^\]]+)', report_content),
-        'local': re.findall(r'\[Local: ([^\]]+)', report_content),
-    }
-
-    for script_ref in citations['script']:
-        if script_ref.split(',')[0].strip() not in audit_content:
-            return False, f"❌ Citation validation failed: [Script: {script_ref}] not found in execution log."
-
-    return True, "All citations validated."
+{chr(10).join(validation_results)}
+"""
 
 
 # =============================================================================
@@ -659,26 +685,21 @@ def make_backend(runtime):
 
 
 # =============================================================================
-# Assemble Deep Agent
+# Initialize Model
 # =============================================================================
 
-print(f"🚀 Initializing ChangHai PDAC Agent v1.0 (Deep Agent Architecture)...")
-print(f"   - Sandbox: {SANDBOX_DIR}")
-print(f"   - Execution Logs: {EXECUTION_LOGS_DIR}")
-print(f"   - Memories: /memories/")
-print(f"   - Skills: 7 PDAC-specific skills mounted")
-print(f"   - Architecture: Flat + Dynamic Module Adaptation")
-print(f"   - Subagents: None")
+print("🧠 Initializing ChangHai PDAC Agent v2.0 (TianTan Essence)...")
+try:
+    model = get_pdac_client_langchain()
+    print("✅ Model connected successfully")
+except Exception as e:
+    print(f"❌ Model initialization failed: {e}")
+    sys.exit(1)
 
-store = InMemoryStore()
-checkpointer = MemorySaver()
 
-interrupt_config = {
-    "write_file": False,
-    "edit_file": False,
-    "execute": False,
-    "read_file": False,
-}
+# =============================================================================
+# Assemble Deep Agent
+# =============================================================================
 
 agent = create_deep_agent(
     model=model,
@@ -687,9 +708,9 @@ agent = create_deep_agent(
         execute,
         read_file,
         analyze_image,
-        submit_pdac_report,
+        submit_mdt_report,
     ],
-    subagents=[],
+    subagents=[],  # NO subagents - flat architecture
     skills=[
         "/skills/dicom_processor",
         "/skills/totalseg_segmentor",
@@ -700,9 +721,8 @@ agent = create_deep_agent(
         "/skills/vascular_topology",
     ],
     backend=make_backend,
-    store=store,
-    checkpointer=checkpointer,
-    interrupt_on=interrupt_config,
+    store=InMemoryStore(),
+    checkpointer=MemorySaver(),
 )
 
 
@@ -711,90 +731,72 @@ agent = create_deep_agent(
 # =============================================================================
 
 if __name__ == "__main__":
-    patient_thread_id = str(uuid.uuid4())
-    execution_logger = ExecutionLogger(patient_thread_id)
+    session_id = str(uuid.uuid4())[:8]
+    init_auditor(session_id)
 
-    print(f"\n✅ ChangHai PDAC Agent v1.0 Ready. Session ID: {patient_thread_id}")
-    print(f"📝 Execution Log: {execution_logger.main_log_path}")
-    print(f"💡 Input patient ID (e.g., CL-03356) or clinical data")
-    print("-" * 60)
+    print(f"""
+{'='*70}
+🩺 ChangHai PDAC Agent v2.0 - Ready
+Session ID: {session_id}
+
+Core Mechanisms:
+  🔍 Execution Audit Loop - All actions recorded
+  🎯 Deep Drill Protocol - Visual fallback on 0ml
+  🧠 Cognitive Skill - Explore before execute
+
+Mandatory Checkpoints:
+  ☐ Environmental Awareness (ls/find)
+  ☐ Tumor Quantification (nnU-Net + Deep Drill if 0ml)
+  ☐ Vascular Topology (SMA/SMV angles)
+  ☐ Cognitive Dissonance Detection
+{'='*70}
+""")
 
     while True:
         try:
-            print("\n🧑‍⚕️ Enter patient information (empty line or `---` to end, exit to quit):")
-            lines = []
-            empty_line_count = 0
-            while True:
-                try:
-                    line_bytes = sys.stdin.buffer.readline()
-                    if not line_bytes:
-                        break
-                    try:
-                        line = line_bytes.decode('utf-8')
-                    except UnicodeDecodeError:
-                        line = line_bytes.decode('utf-8', errors='replace')
+            print("\n🧑‍⚕️ Enter patient ID (e.g., C3L-03356) or 'exit' to quit:")
+            user_input = input().strip()
 
-                    if line.strip().lower() in ["exit", "quit"] and len(lines) == 0:
-                        print("👋 Goodbye!")
-                        sys.exit(0)
+            if user_input.lower() in ['exit', 'quit', 'q']:
+                print("👋 Goodbye!")
+                break
 
-                    if line.strip() == "" or line.strip() == "---":
-                        empty_line_count += 1
-                        if empty_line_count >= 1:
-                            break
-                    else:
-                        empty_line_count = 0
-
-                    lines.append(line)
-
-                except EOFError:
-                    break
-
-            user_input = "\n".join(lines).strip()
             if not user_input:
                 continue
 
-            # Auto-detect patient ID
+            # Extract patient ID
             patient_id = None
-            id_match = re.search(r'(CL-\d+|C3L-\d+)', user_input, re.IGNORECASE)
+            id_match = re.search(r'(C3L-\d+|CL-\d+)', user_input, re.IGNORECASE)
             if id_match:
                 patient_id = id_match.group(1).upper()
 
-            execution_logger.log_user_input(user_input, patient_id)
-            print(f"\n⏳ Agent thinking... (Patient ID: {patient_id or 'N/A'})")
+            print(f"\n🔍 Patient: {patient_id or 'Unknown'}")
+            print("⏳ Agent analyzing... (this may take a few minutes)\n")
 
+            # Stream agent execution
             events = agent.stream(
                 {"messages": [{"role": "user", "content": user_input}]},
-                config={"configurable": {"thread_id": patient_thread_id}},
+                config={"configurable": {"thread_id": session_id}},
                 stream_mode="values"
             )
 
-            last_printed_msg_id = None
             for event in events:
                 messages = event.get("messages", [])
-                if not messages:
-                    continue
-                last_msg = messages[-1]
+                if messages:
+                    last_msg = messages[-1]
+                    if hasattr(last_msg, 'content') and last_msg.content:
+                        print(last_msg.content)
 
-                if id(last_msg) == last_printed_msg_id:
-                    continue
-                last_printed_msg_id = id(last_msg)
-
-                if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
-                    for tc in last_msg.tool_calls:
-                        tool_name = tc.get('name', 'unknown')
-                        tool_args = tc.get('args', {})
-                        print(f"\n⚙️  [Tool Call] {tool_name} (args: {tool_args})")
-
-                content = getattr(last_msg, 'content', '')
-                if content:
-                    print(f"\n🤖 Agent:\n{content}")
-                    execution_logger.log_agent_thinking(content, "response")
+                    # Print tool calls
+                    if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                        for tc in last_msg.tool_calls:
+                            tool_name = tc.get('name', '')
+                            print(f"\n⚙️  Executing: {tool_name}")
 
         except KeyboardInterrupt:
-            print("\nSession interrupted.")
+            print("\n\n⏸️ Interrupted by user")
             break
         except Exception as e:
             print(f"\n❌ Error: {e}")
             import traceback
-            execution_logger.log_error(str(e), "runtime_error", traceback.format_exc())
+            traceback.print_exc()
