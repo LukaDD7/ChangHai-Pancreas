@@ -38,10 +38,14 @@ from utils.llm_factory import get_pdac_client_langchain
 # =============================================================================
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-SKILLS_DIR = os.path.join(PROJECT_ROOT, "skills")
-SANDBOX_DIR = os.path.join(PROJECT_ROOT, "workspace", "sandbox")
+# Agent workspace (isolated from development)
+WORKSPACE_DIR = os.path.join(PROJECT_ROOT, "workspace")
+SANDBOX_DIR = os.path.join(WORKSPACE_DIR, "sandbox")
+# Skills are backed up to sandbox for Agent use (isolated from dev changes)
+SKILLS_DIR = os.path.join(SANDBOX_DIR, "skills")
 EXECUTION_LOGS_DIR = os.path.join(SANDBOX_DIR, "execution_logs")
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+# Raw data source (read-only)
+DATA_SOURCE_DIR = os.path.join(PROJECT_ROOT, "data", "raw", "dicom")
 AUDIT_LOG_PATH = os.path.join(SANDBOX_DIR, "execution_audit_log.txt")
 
 os.makedirs(SANDBOX_DIR, exist_ok=True)
