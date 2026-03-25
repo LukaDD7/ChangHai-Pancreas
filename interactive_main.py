@@ -213,8 +213,15 @@ L3_SYSTEM_PROMPT = """You are the ChangHai PDAC MDT Chief Agent - an autonomous 
      b) DISCOVER the actual file paths (don't assume!)
      c) READ the SKILL.md using `read_file` to understand the clinical reasoning
      d) ASSEMBLE the command based on discovered paths
-   - Example: Instead of assuming `/workspace/sandbox/data/nifti/C3L-03348.nii.gz`,
-     you MUST first run `find /workspace/sandbox -name "*.nii.gz"` to locate it.
+   - **CRITICAL: ALWAYS use limited-scope find with specific paths:**
+     ```bash
+     # ✅ CORRECT - Limited scope
+     find /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom -maxdepth 4 -name "*CL-03356*"
+     find /media/luzhenyang/project/ChangHai_PDA/workspace/sandbox/data -maxdepth 3 -name "*.nii.gz"
+
+     # ❌ WRONG - Never search entire server
+     find / -name "*.nii.gz"
+     ```
 
 2. **DEEP DRILL PROTOCOL** (深钻探针):
    - When nnU-Net returns tumor volume = 0ml, you MUST NOT conclude "no tumor"!
@@ -352,6 +359,12 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
         "curl", "wget", "ssh", "nc -l", ":(){:|:&};:",
     )
 
+    # BLOCK server-wide searches without scope limits
+    if "find / -" in command or "find /home -" in command or "find /opt -" in command:
+        if "-maxdepth" not in command:
+            error_msg = f"❌ BLOCKED: find must use -maxdepth to limit scope. Example: find {SANDBOX_DIR} -maxdepth 3 -name '*.nii.gz'"
+            return json.dumps({"error": error_msg, "command": command[:50]})
+
     is_allowed = any(command.strip().startswith(prefix) for prefix in ALLOWED_PREFIXES)
     is_dangerous = any(pattern in command.lower() for pattern in DANGEROUS_PATTERNS)
 
@@ -363,9 +376,18 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
         error_msg = f"❌ BLOCKED: Command not in whitelist. Allowed: ls, cat, find, python, conda run"
         return json.dumps({"error": error_msg, "command": command[:50]})
 
+    # Convert virtual paths to actual paths
+    # /skills/ -> SANDBOX_DIR/skills/
+    # /workspace/sandbox/ -> SANDBOX_DIR/
+    actual_command = command
+    if "/skills/" in command:
+        actual_command = command.replace("/skills/", f"{SANDBOX_DIR}/skills/")
+    if "/workspace/sandbox/" in command:
+        actual_command = command.replace("/workspace/sandbox/", f"{SANDBOX_DIR}/")
+
     try:
         result = subprocess.run(
-            command,
+            actual_command,
             shell=True,
             capture_output=True,
             text=True,
@@ -375,12 +397,12 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Create audit record
+        # Create audit record (log original command for traceability)
         record = AuditRecord(
             timestamp=datetime.now().isoformat(),
             tool_name="execute",
-            command=command,
-            arguments={"timeout": timeout, "patient_id": patient_id},
+            command=command,  # Log original virtual command
+            arguments={"timeout": timeout, "patient_id": patient_id, "actual_command": actual_command},
             exit_code=result.returncode,
             stdout=result.stdout[:5000],
             stderr=result.stderr[:2000] if result.stderr else "",
