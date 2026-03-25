@@ -56,7 +56,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.0] - 2026-03-20
+## [1.1.0] - 2026-03-25
+
+### Full Execution Logging System (ExecutionLogger)
+
+#### Added
+- **ExecutionLogger class**: Complete traceability of all Agent actions
+  - Per-patient log directories: `execution_logs/{patient_id}_{session_id}/`
+  - Structured JSONL logs (`execution_log.jsonl`) + human-readable logs (`execution.log`)
+  - Artifact manifest (`artifacts.json`) tracking all generated files
+  - Session summary with execution statistics
+
+- **Automatic artifact detection**: `_detect_and_log_artifacts()` function
+  - Parses stdout for generated files (NIfTI, PNG, JSON, etc.)
+  - Automatically logs artifacts without Agent intervention
+  - Supports common output patterns: "Saved to:", "Output:", file extensions
+
+- **Tool call logging**: All 4 core tools now log to ExecutionLogger
+  - `execute`: Logs command, arguments, result, duration, auto-detects artifacts
+  - `read_file`: Logs file reads with path and line count
+  - `analyze_image`: Logs VLM calls and tracks image artifacts
+  - `submit_mdt_report`: Logs report submission with citation validation
+
+- **User input tracking**: `log_user_input()` captures patient ID entry
+
+#### Enhanced
+- **nnU-Net environment auto-injection**: `execute()` tool now automatically sets
+  required environment variables when running nnU-Net commands:
+  - `nnUNet_raw_data_base`
+  - `nnUNet_preprocessed`
+  - `RESULTS_FOLDER`
+
+- **Security enhancements**:
+  - Blocked server-wide `find` without `-maxdepth` limit
+  - Dangerous pattern detection (curl, wget, ssh, etc.)
+  - Command whitelist enforcement
+
+- **Virtual path handling**: Improved `/skills/` and `/workspace/sandbox/` conversion
+  to actual filesystem paths in `execute()` tool
+
+#### Architecture
+- Deep Agents flat architecture with full audit trail
+- Evidence sovereignty: All measurements have physical traceability via logs
+- Citation validation: Reports rejected if citations lack execution records
+
+---
 
 ### Initial Architecture Setup
 
@@ -120,4 +164,4 @@ The Agent now makes more intelligent, context-aware decisions.
 
 ---
 
-*Last Updated: 2026-03-24*
+*Last Updated: 2026-03-25*

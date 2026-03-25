@@ -1,0 +1,46 @@
+# Data directories
+data/models/
+data/raw/
+data/processed/
+data/results/
+data/temp/
+data_archive/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Workspace
+workspace/
+sandbox/
+tmp/
+test_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Large files
+*.safetensors
+*.bin
+*.ckpt
+*.pth
+*.nii.gz
+*.dcm
+
+# Keep directory structure
+!data/models/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/results/.gitkeep

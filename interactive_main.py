@@ -197,6 +197,237 @@ def init_auditor(session_id: str):
 
 
 # =============================================================================
+# Full Execution Logger (全量执行记录 - 类似TianTan Agent)
+# =============================================================================
+
+class ExecutionLogger:
+    """
+    Full execution logging system for complete traceability.
+
+    Logs:
+    - User input
+    - Agent thinking/reasoning
+    - Tool calls and results
+    - Checkpoints
+    - Intermediate artifacts (NIfTI, PNG, JSON files)
+    - Errors
+    """
+
+    def __init__(self, session_id: str, patient_id: Optional[str] = None):
+        self.session_id = session_id
+        self.patient_id = patient_id
+        self.start_time = datetime.now()
+
+        # Create patient-specific log directory
+        if patient_id:
+            self.log_dir = os.path.join(EXECUTION_LOGS_DIR, f"{patient_id}_{session_id}")
+        else:
+            self.log_dir = os.path.join(EXECUTION_LOGS_DIR, f"session_{session_id}")
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        # Log file paths
+        self.structured_log_path = os.path.join(self.log_dir, "execution_log.jsonl")
+        self.human_log_path = os.path.join(self.log_dir, "execution.log")
+        self.artifacts_log_path = os.path.join(self.log_dir, "artifacts.json")
+
+        # In-memory tracking
+        self.artifacts: List[Dict] = []
+        self.tool_calls: List[Dict] = []
+        self.checkpoints: List[Dict] = []
+
+        # Initialize human-readable log
+        self._init_human_log()
+
+    def _init_human_log(self):
+        """Initialize human-readable log file"""
+        header = f"""
+{'#'*80}
+# ChangHai PDAC Agent - Full Execution Log
+# Session ID: {self.session_id}
+# Patient ID: {self.patient_id or 'N/A'}
+# Start Time: {self.start_time.isoformat()}
+# Log Directory: {self.log_dir}
+# Principle: Complete Traceability of All Actions
+{'#'*80}
+
+"""
+        with open(self.human_log_path, 'w', encoding='utf-8') as f:
+            f.write(header)
+
+    def _write_structured(self, entry: Dict):
+        """Write structured JSONL entry"""
+        entry['timestamp'] = datetime.now().isoformat()
+        entry['session_id'] = self.session_id
+        entry['patient_id'] = self.patient_id
+        with open(self.structured_log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+    def _write_human(self, text: str):
+        """Append to human-readable log"""
+        timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+        with open(self.human_log_path, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {text}\n")
+
+    def log_user_input(self, user_input: str):
+        """Log user input"""
+        entry = {
+            'type': 'USER_INPUT',
+            'content': user_input
+        }
+        self._write_structured(entry)
+        self._write_human(f"\n{'='*60}\nUSER INPUT: {user_input}\n{'='*60}")
+
+    def log_agent_thinking(self, thought: str, phase: str = "GENERAL"):
+        """Log agent thinking/reasoning"""
+        entry = {
+            'type': 'AGENT_THINKING',
+            'phase': phase,
+            'thought': thought
+        }
+        self._write_structured(entry)
+        self._write_human(f"\n[THINKING - {phase}]\n{thought}\n")
+
+    def log_tool_call(self, tool_name: str, arguments: Dict, result: Any, duration_ms: int = 0):
+        """Log tool call with arguments and result"""
+        entry = {
+            'type': 'TOOL_CALL',
+            'tool_name': tool_name,
+            'arguments': arguments,
+            'result': str(result)[:5000] if result else None,
+            'duration_ms': duration_ms
+        }
+        self._write_structured(entry)
+
+        # Truncate result for human log
+        result_preview = str(result)[:500] + "..." if result and len(str(result)) > 500 else str(result)
+        self._write_human(f"""
+[TOOL CALL: {tool_name}]
+Arguments: {json.dumps(arguments, ensure_ascii=False)}
+Duration: {duration_ms}ms
+Result Preview: {result_preview}
+---
+""")
+        self.tool_calls.append(entry)
+
+    def log_checkpoint(self, checkpoint_name: str, status: str, details: Dict = None):
+        """Log checkpoint status"""
+        entry = {
+            'type': 'CHECKPOINT',
+            'checkpoint_name': checkpoint_name,
+            'status': status,
+            'details': details or {}
+        }
+        self._write_structured(entry)
+        self._write_human(f"[CHECKPOINT: {checkpoint_name}] Status: {status}")
+        if details:
+            self._write_human(f"  Details: {json.dumps(details, ensure_ascii=False)}")
+        self.checkpoints.append(entry)
+
+    def log_artifact(self, artifact_type: str, file_path: str, metadata: Dict = None):
+        """Log generated artifact (NIfTI, PNG, JSON, etc.)"""
+        # Convert to relative path if under project dir
+        rel_path = file_path
+        if file_path.startswith(PROJECT_ROOT):
+            rel_path = file_path[len(PROJECT_ROOT):]
+
+        entry = {
+            'type': 'ARTIFACT',
+            'artifact_type': artifact_type,
+            'file_path': file_path,
+            'relative_path': rel_path,
+            'metadata': metadata or {},
+            'file_size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+            'created_at': datetime.now().isoformat()
+        }
+        self._write_structured(entry)
+        self._write_human(f"[ARTIFACT: {artifact_type}] {rel_path}")
+        self.artifacts.append(entry)
+
+        # Update artifacts manifest
+        with open(self.artifacts_log_path, 'w', encoding='utf-8') as f:
+            json.dump(self.artifacts, f, ensure_ascii=False, indent=2)
+
+    def log_error(self, error_type: str, error_message: str, context: Dict = None):
+        """Log error with context"""
+        entry = {
+            'type': 'ERROR',
+            'error_type': error_type,
+            'error_message': error_message,
+            'context': context or {}
+        }
+        self._write_structured(entry)
+        self._write_human(f"""
+{'!'*60}
+[ERROR: {error_type}]
+Message: {error_message}
+Context: {json.dumps(context, ensure_ascii=False) if context else 'N/A'}
+{'!'*60}
+""")
+
+    def log_llm_interaction(self, prompt: str, response: str, model: str = "", tokens_used: int = 0):
+        """Log LLM interaction"""
+        entry = {
+            'type': 'LLM_INTERACTION',
+            'model': model,
+            'prompt_preview': prompt[:1000],
+            'response_preview': response[:2000],
+            'tokens_used': tokens_used
+        }
+        self._write_structured(entry)
+        self._write_human(f"""
+[LLM INTERACTION - {model}]
+Prompt Preview: {prompt[:200]}...
+Response Preview: {response[:300]}...
+Tokens: {tokens_used}
+---
+""")
+
+    def get_session_summary(self) -> Dict:
+        """Get summary of execution session"""
+        duration = (datetime.now() - self.start_time).total_seconds()
+        return {
+            'session_id': self.session_id,
+            'patient_id': self.patient_id,
+            'start_time': self.start_time.isoformat(),
+            'duration_seconds': duration,
+            'total_tool_calls': len(self.tool_calls),
+            'total_artifacts': len(self.artifacts),
+            'total_checkpoints': len(self.checkpoints),
+            'artifact_types': list(set(a['artifact_type'] for a in self.artifacts)),
+            'log_directory': self.log_dir
+        }
+
+    def finalize(self):
+        """Finalize logging and write summary"""
+        summary = self.get_session_summary()
+        with open(os.path.join(self.log_dir, "session_summary.json"), 'w') as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        self._write_human(f"""
+{'#'*60}
+SESSION FINALIZED
+Summary: {json.dumps(summary, ensure_ascii=False)}
+{'#'*60}
+""")
+
+
+# Global logger instance
+_logger: Optional[ExecutionLogger] = None
+
+
+def get_logger() -> ExecutionLogger:
+    """Get global logger instance"""
+    if _logger is None:
+        raise RuntimeError("Logger not initialized. Call init_logger() first.")
+    return _logger
+
+
+def init_logger(session_id: str, patient_id: Optional[str] = None):
+    """Initialize global logger"""
+    global _logger
+    _logger = ExecutionLogger(session_id, patient_id)
+
+
+# =============================================================================
 # L3 System Prompt (Pancreatic Cancer Specific)
 # =============================================================================
 
@@ -386,6 +617,13 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
         actual_command = command.replace("/workspace/sandbox/", f"{SANDBOX_DIR}/")
 
     try:
+        # Prepare environment with nnUNet variables if running nnunet commands
+        env = os.environ.copy()
+        if "nnunet" in command.lower() or "nnUNet" in command:
+            env["nnUNet_raw_data_base"] = "/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/raw"
+            env["nnUNet_preprocessed"] = "/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/preprocessed"
+            env["RESULTS_FOLDER"] = "/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet/nnunet_v1_workspace/results"
+
         result = subprocess.run(
             actual_command,
             shell=True,
@@ -393,6 +631,7 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
             text=True,
             timeout=timeout,
             cwd=SANDBOX_DIR,
+            env=env,
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -415,6 +654,7 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
         if _auditor:
             _auditor.record(record)
 
+
         output_data = {
             "exit_code": result.returncode,
             "stdout": result.stdout[:5000],
@@ -423,12 +663,70 @@ def execute(command: str, timeout: int = 600, patient_id: Optional[str] = None) 
             "command": command,
         }
 
+        # Log to full execution logger
+        if _logger:
+            _logger.log_tool_call(
+                tool_name="execute",
+                arguments={"command": command, "actual_command": actual_command, "timeout": timeout},
+                result=output_data,
+                duration_ms=duration_ms
+            )
+
+            # Detect and log any generated artifacts
+            if result.returncode == 0:
+                _detect_and_log_artifacts(command, result.stdout)
+
         return json.dumps(output_data, ensure_ascii=False, indent=2)
 
     except subprocess.TimeoutExpired:
         return json.dumps({"error": f"Timeout after {timeout}s", "command": command})
     except Exception as e:
         return json.dumps({"error": str(e), "command": command})
+
+def _detect_and_log_artifacts(command: str, stdout: str):
+    """
+    Detect and log artifacts generated by script execution.
+    Parses stdout for common output file patterns.
+    """
+    if not _logger:
+        return
+
+    import re
+
+    # Common patterns for output files
+    patterns = [
+        r'(?:Saved to|Output|saved to|output|Writing to|Saved):\s*([\S]+\.\w+)',
+        r'(/[\w\-/]+/(?:nifti|segmentations|results|images|temp)/[\w\-]+\.\w+)',
+    ]
+
+    found_files = set()
+    for pattern in patterns:
+        matches = re.findall(pattern, stdout, re.IGNORECASE)
+        for match in matches:
+            if os.path.exists(match):
+                found_files.add(match)
+
+    # Log each found artifact
+    for file_path in found_files:
+        if '.nii' in file_path.lower():
+            artifact_type = "NIFTI_FILE"
+        elif '.png' in file_path.lower():
+            artifact_type = "IMAGE_FILE"
+        elif '.json' in file_path.lower():
+            artifact_type = "JSON_FILE"
+        elif '.csv' in file_path.lower():
+            artifact_type = "CSV_FILE"
+        elif '.md' in file_path.lower():
+            artifact_type = "MARKDOWN_FILE"
+        else:
+            artifact_type = "OUTPUT_FILE"
+
+        _logger.log_artifact(
+            artifact_type=artifact_type,
+            file_path=file_path,
+            metadata={"source_command": command[:100]}
+        )
+
 
 
 @tool
@@ -494,6 +792,15 @@ def read_file(path: str, limit: int = 2000, offset: int = 0) -> str:
                 working_dir=SANDBOX_DIR
             )
             _auditor.record(record)
+
+        # Log to execution logger
+        if _logger:
+            _logger.log_tool_call(
+                tool_name="read_file",
+                arguments={"path": path, "limit": limit, "offset": offset},
+                result={"lines_read": len(selected), "total_lines": len(lines)},
+                duration_ms=0
+            )
 
         return output
 
@@ -574,6 +881,20 @@ def analyze_image(image_path: str, query: str, patient_id: Optional[str] = None)
             )
             _auditor.record(record)
 
+        # Log to execution logger and track artifact
+        if _logger:
+            _logger.log_tool_call(
+                tool_name="analyze_image",
+                arguments={"image_path": image_path, "query": query[:100]},
+                result={"vlm_result": result[:500]},
+                duration_ms=duration_ms
+            )
+            _logger.log_artifact(
+                artifact_type="IMAGE_ANALYSIS",
+                file_path=actual_path,
+                metadata={"query": query[:100], "result_preview": result[:200]}
+            )
+
         return f"""✅ VLM Analysis Complete
 
 📁 Image: {image_path}
@@ -610,7 +931,7 @@ def submit_mdt_report(patient_id: str, report_content: str) -> str:
     start_time = time.time()
 
     # Step 1: Extract citations
-    citation_pattern = r'\[(Script|Tool):\s*([^,\]]+)',
+    citation_pattern = r'\[(Script|Tool):\s*([^,\]]+)'
     citations = re.findall(citation_pattern, report_content)
 
     validation_results = []
@@ -677,6 +998,20 @@ CITATION VALIDATION FAILED:
         patient_id=patient_id
     )
     get_auditor().record(record)
+
+    # Log to execution logger and track final report as artifact
+    if _logger:
+        _logger.log_tool_call(
+            tool_name="submit_mdt_report",
+            arguments={"patient_id": patient_id, "citations_count": len(citations)},
+            result={"report_path": report_path, "validation_results": validation_results},
+            duration_ms=duration_ms
+        )
+        _logger.log_artifact(
+            artifact_type="FINAL_REPORT",
+            file_path=report_path,
+            metadata={"patient_id": patient_id, "citations_count": len(citations)}
+        )
 
     return f"""✅ MDT REPORT SUBMITTED SUCCESSFULLY
 
@@ -760,6 +1095,9 @@ if __name__ == "__main__":
     session_id = str(uuid.uuid4())[:8]
     init_auditor(session_id)
 
+    # Initialize full execution logger (per-patient logs)
+    init_logger(session_id)
+
     print(f"""
 {'='*70}
 🩺 ChangHai PDAC Agent v2.0 - Ready
@@ -785,6 +1123,8 @@ Mandatory Checkpoints:
 
             if user_input.lower() in ['exit', 'quit', 'q']:
                 print("👋 Goodbye!")
+                if _logger:
+                    _logger.finalize()
                 break
 
             if not user_input:
@@ -795,6 +1135,11 @@ Mandatory Checkpoints:
             id_match = re.search(r'(C3L-\d+|CL-\d+)', user_input, re.IGNORECASE)
             if id_match:
                 patient_id = id_match.group(1).upper()
+
+            # Log user input with patient context
+            if _logger:
+                _logger.patient_id = patient_id
+                _logger.log_user_input(user_input)
 
             print(f"\n🔍 Patient: {patient_id or 'Unknown'}")
             print("⏳ Agent analyzing... (this may take a few minutes)\n")

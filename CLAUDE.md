@@ -98,6 +98,49 @@ windowed = np.clip(windowed, 0, 255)
 
 ---
 
+## 全量执行记录系统 (ExecutionLogger v1.0)
+
+### 概述
+完整的执行日志系统，提供从用户输入到最终报告的全链路追溯能力。
+
+### 日志结构
+```
+workspace/sandbox/execution_logs/
+└── {patient_id}_{session_id}/
+    ├── execution_log.jsonl       # 结构化JSONL日志
+    ├── execution.log              # 人类可读日志
+    ├── artifacts.json             # 产物清单
+    └── session_summary.json       # 会话摘要
+```
+
+### 记录内容
+
+| 类型 | 记录内容 | 用途 |
+|------|----------|------|
+| USER_INPUT | 患者ID输入 | 追溯分析起点 |
+| TOOL_CALL | 工具调用、参数、结果、耗时 | 审计追踪 |
+| ARTIFACT | 生成的文件(NIfTI/PNG/JSON等) | 产物管理 |
+| LLM_INTERACTION | VLM调用记录 | 模型行为追溯 |
+| CHECKPOINT | 关键决策点 | 决策过程审查 |
+
+### 自动产物检测
+执行脚本时，系统自动解析stdout检测生成的文件：
+- 匹配模式: "Saved to:", "Output:", "*.nii.gz", "*.png"等
+- 自动记录文件路径、大小、类型、生成时间
+- 无需Agent手动调用
+
+### 与审计系统的区别
+- **ExecutionAuditor**: 强审计闭环，用于引用验证
+- **ExecutionLogger**: 全量记录，用于完整追溯和分析
+
+### 引用验证
+报告提交时自动验证所有引用：
+- 检查 `[Script: xxx]` 是否在审计日志中
+- 检查 `[Tool: xxx]` 是否有执行记录
+- 未经验证的引用将导致报告被拒绝
+
+---
+
 ## 虚拟环境配置
 
 ### 1. ChangHai (主系统环境)
@@ -127,6 +170,10 @@ conda activate nnunetv2
 - **用途**: nnU-Net v1/v2 胰腺肿瘤分割
 - **核心包**: nnunet (v1), PyTorch 2.0.1 with CUDA 11.8
 - **重要补丁**: 3处 `torch.load()` 添加 `weights_only=False` 以兼容 PyTorch 2.6
+- **环境变量自动注入**: `execute()` 工具检测到 nnU-Net 命令时自动设置：
+  - `nnUNet_raw_data_base`
+  - `nnUNet_preprocessed`
+  - `RESULTS_FOLDER`
 
 ## 目录结构
 
@@ -298,4 +345,4 @@ conda run -n llava-med python scripts/verify_llava_med.py
 ```
 
 ---
-*最后更新: 2026-03-24*
+*最后更新: 2026-03-25*
