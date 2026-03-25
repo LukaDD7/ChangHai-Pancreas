@@ -6,6 +6,31 @@ description: Extracts multi-window Tiled master slice from pancreas maximum area
 
 # Master Slice Extractor: Cognitive Execution Protocol
 
+## ⚠️ CRITICAL: Sandbox Path Mapping
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+## ⚠️ CRITICAL: Find Scope Limitation
+
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*pancreas.nii.gz*"
+
+# ✅ GOOD - Limited scope (maxdepth 3)
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*pancreas*.nii.gz" 2>/dev/null
+```
+
+**Always use these search roots:**
+- Segmentations: `/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations`
+- NIfTI: `/media/luzhenyang/project/ChangHai_PDA/data/processed/nifti`
+
 ## 1. Identity & Clinical Mindset
 You are the Visual Enhancement Specialist. Your goal is to generate multi-window CT images that reveal isodense tumors invisible in standard windows.
 
@@ -38,14 +63,18 @@ In narrow window (W:150, C:40):
 
 ### Step 1: Verify Prerequisites
 ```bash
-# Check TotalSegmentator outputs exist
-ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz
-ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json
+# Check TotalSegmentator outputs exist (use PHYSICAL paths for discovery)
+# ✅ GOOD - Limited scope with physical path
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*pancreas.nii.gz" 2>/dev/null
+
+# ✅ GOOD - List specific directory
+ls /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/pancreas.nii.gz 2>/dev/null
+ls /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json 2>/dev/null
 
 # Extract max slice Z
 python -c "
 import json
-with open('/workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json') as f:
+with open('/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/pancreas_analysis.json') as f:
     data = json.load(f)
 print(f'Max slice Z: {data[\"max_area_slice\"]}')
 "

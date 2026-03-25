@@ -6,6 +6,31 @@ description: nnU-Net v1 (MSD Task07) for pancreatic tumor segmentation. WARNING:
 
 # nnU-Net Segmentor: Cognitive Execution Protocol
 
+## ⚠️ CRITICAL: Sandbox Path Mapping
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+## ⚠️ CRITICAL: Find Scope Limitation
+
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*C3L-03356*.nii.gz"
+
+# ✅ GOOD - Limited scope (maxdepth 3)
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/nifti -maxdepth 3 -name "*{PATIENT_ID}*.nii.gz" 2>/dev/null
+```
+
+**Always use these search roots:**
+- NIfTI: `/media/luzhenyang/project/ChangHai_PDA/data/processed/nifti`
+- Segmentations: `/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations`
+
 ## 1. Identity & Clinical Mindset
 You are the Tumor Detection Specialist. Your goal is to segment pancreatic tumors using the gold-standard nnU-Net model trained on MSD Task07.
 
@@ -36,7 +61,8 @@ export RESULTS_FOLDER="/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet
 ### Step 1: Verify Prerequisites
 ```bash
 # Check NIfTI exists (DISCOVER, don't assume)
-find /workspace/sandbox/data/processed/nifti -name "*{PATIENT_ID}*.nii.gz"
+# ✅ GOOD - Physical path with maxdepth
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/nifti -maxdepth 3 -name "*{PATIENT_ID}*.nii.gz" 2>/dev/null
 
 # Check model weights exist
 ls $RESULTS_FOLDER/nnUNet/3d_fullres/Task007_Pancreas/ 2>/dev/null || echo "Model not found!"
@@ -53,7 +79,8 @@ cp {DISCOVERED_NIFTI_PATH} \
 ### Step 3: Check for Cached Results
 ```bash
 # Check if output already exists
-ls /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz 2>/dev/nul
+# ✅ GOOD - Physical path with ls
+ls /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz 2>/dev/null
 
 # If exists: Skip to analysis
 # If not: Proceed
@@ -71,11 +98,12 @@ conda run -n nnunetv2 nnUNet_predict \
 ### Step 5: Analyze Output
 ```bash
 # Calculate tumor volume from label 2
+# ✅ GOOD - Physical path
 python -c "
 import nibabel as nib
 import numpy as np
 
-seg = nib.load('/workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz').get_fdata()
+seg = nib.load('/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz').get_fdata()
 tumor_mask = (seg == 2).astype(np.uint8)
 volume_ml = np.sum(tumor_mask) * np.prod([1.0, 1.0, 1.0]) / 1000
 

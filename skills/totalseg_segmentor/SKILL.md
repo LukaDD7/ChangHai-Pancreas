@@ -24,6 +24,17 @@ You are the Anatomical Structure Mapper. Your goal is to segment key organs and 
 
 **(Agent, you MUST verify NIfTI exists before running!)**
 
+### ⚠️ CRITICAL: Find Scope Limitation
+**Use PHYSICAL paths with -maxdepth to avoid server-wide search:**
+
+```bash
+# ✅ GOOD - Limited scope with physical path
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/nifti -maxdepth 3 -name "*{PATIENT_ID}*.nii.gz" 2>/dev/null
+
+# ❌ BAD - Virtual path may not work with find, and no depth limit
+find /workspace/sandbox/data/processed/nifti -name "*{PATIENT_ID}*.nii.gz"
+```
+
 ## 3. Cognitive Reasoning & SOP
 
 ### Step 1: Verify Prerequisites

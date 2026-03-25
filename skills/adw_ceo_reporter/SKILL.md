@@ -6,6 +6,33 @@ description: ADW CEO (AI Diagnostic Workflow Chief Executive Officer). Reconcile
 
 # ADW CEO Reporter: Cognitive Execution Protocol
 
+## ⚠️ CRITICAL: Sandbox Path Mapping
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+## ⚠️ CRITICAL: Find Scope Limitation
+
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*nnunet*{PATIENT_ID}*"
+
+# ✅ GOOD - Limited scope (maxdepth 4)
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*" -type d 2>/dev/null
+find /media/luzhenyang/project/ChangHai_PDA/data/results/vascular -maxdepth 2 -name "*{PATIENT_ID}*.json" 2>/dev/null
+```
+
+**Always use these search roots:**
+- Segmentations: `/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations`
+- Vascular Results: `/media/luzhenyang/project/ChangHai_PDA/data/results/vascular`
+- JSON Results: `/media/luzhenyang/project/ChangHai_PDA/data/results/json`
+
 ## 1. Identity & Clinical Mindset
 You are the Chief Executive Officer of the AI Diagnostic Workflow. Your role is to:
 1. Detect conflicts between AI models (nnU-Net vs VLM)
@@ -40,16 +67,16 @@ Required Inputs:
 └── Execution Audit Log: For citation validation
 ```
 
-**Discovery Commands**:
+**Discovery Commands** (use PHYSICAL paths with maxdepth):
 ```bash
 # Find nnU-Net results
-find /workspace/sandbox/data/processed/segmentations -name "*{PATIENT_ID}*" -type d
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*" -type d 2>/dev/null
 
 # Read tumor analysis
-cat /workspace/sandbox/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/tumor_analysis.json 2>/dev/null || echo "Not found"
+cat /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/tumor_analysis.json 2>/dev/null || echo "Not found"
 
 # Find vascular results
-cat /workspace/sandbox/data/results/vascular/{PATIENT_ID}_vascular_assessment.json 2>/dev/null || echo "Not found"
+cat /media/luzhenyang/project/ChangHai_PDA/data/results/vascular/{PATIENT_ID}_vascular_assessment.json 2>/dev/null || echo "Not found"
 ```
 
 ### Step 2: Conflict Detection

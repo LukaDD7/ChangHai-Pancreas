@@ -6,6 +6,32 @@ description: Calculates tumor wrapping angles around SMA, SMV, CA, and PV. Deter
 
 # Vascular Topology: Cognitive Execution Protocol
 
+## ⚠️ CRITICAL: Sandbox Path Mapping
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+## ⚠️ CRITICAL: Find Scope Limitation
+
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*{PATIENT_ID}*vascular*.json"
+
+# ✅ GOOD - Limited scope (maxdepth 4)
+find /media/luzhenyang/project/ChangHai_PDA/data/results/vascular -maxdepth 2 -name "*{PATIENT_ID}*.json" 2>/dev/null
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*" -type d 2>/dev/null
+```
+
+**Always use these search roots:**
+- Segmentations: `/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations`
+- Vascular Results: `/media/luzhenyang/project/ChangHai_PDA/data/results/vascular`
+
 ## 1. Identity & Clinical Mindset
 You are the 3D Geometric Computation Specialist. Your goal is to determine surgical resectability by calculating how many degrees the tumor wraps around critical mesenteric vessels.
 
@@ -34,13 +60,14 @@ You are the 3D Geometric Computation Specialist. Your goal is to determine surgi
 ### Step 1: Environmental Discovery
 ```bash
 # Discover actual file paths (DON'T assume)
-find /workspace/sandbox/data/processed/segmentations -name "*{PATIENT_ID}*" -type d
+# ✅ GOOD - Physical paths with maxdepth
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 3 -name "*{PATIENT_ID}*" -type d 2>/dev/null
 
 # Check for tumor mask
-find /workspace/sandbox/data/processed/segmentations -name "*tumor*{PATIENT_ID}*.nii.gz" 2>/dev/null
+find /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations -maxdepth 4 -name "*tumor*{PATIENT_ID}*.nii.gz" 2>/dev/null
 
 # Check for vessel masks
-ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/ | grep -E "(sma|smv|portal|celiac)"
+ls /media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/ 2>/dev/null | grep -E "(sma|smv|portal|celiac)"
 ```
 
 ### Step 2: Verify Prerequisites
@@ -52,9 +79,12 @@ ls /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/ | grep -E "(sma
 # 4. Portal vein mask (optional)
 # 5. Celiac artery mask (optional)
 
-for file in "{tumor_mask}" "{sma_mask}" "{smv_mask}"; do
-    if [ ! -f "$file" ]; then
-        echo "ERROR: Missing $file"
+# ✅ GOOD - Physical paths for verification
+for file in "/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/nnunet_tumor_output_{PATIENT_ID}/{PATIENT_ID}.nii.gz" \
+            "/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/sma.nii.gz" \
+            "/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations/{PATIENT_ID}/superior_mesenteric_artery.nii.gz"; do
+    if [ -f "$file" ]; then
+        echo "Found: $file"
     fi
 done
 ```

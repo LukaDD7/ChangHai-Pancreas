@@ -24,16 +24,45 @@ You are the Data Ingestion Specialist. Your goal is to ensure all downstream ana
 
 **(Agent, you MUST use `find` to locate DICOM directory first!)**
 
+### ⚠️ CRITICAL: Sandbox Path Mapping
+In this system, there are TWO ways to reference paths:
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+### ⚠️ CRITICAL: Find Scope Limitation
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*C3L-03356*"
+
+# ✅ GOOD - Limited scope (maxdepth 4)
+find /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom -maxdepth 4 -name "*C3L-03356*" 2>/dev/null
+
+# ✅ GOOD - With timeout protection
+find /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom -maxdepth 4 -name "*C3L-03356*" 2>/dev/null
+```
+
+**Always use these search roots:**
+- DICOM: `/media/luzhenyang/project/ChangHai_PDA/data/raw/dicom`
+- NIfTI: `/media/luzhenyang/project/ChangHai_PDA/data/processed/nifti`
+- Segmentations: `/media/luzhenyang/project/ChangHai_PDA/data/processed/segmentations`
+
 ## 3. Cognitive Reasoning & SOP
 
 ### Step 1: Environmental Discovery (MANDATORY)
-**DO NOT assume file locations.** Use `execute` to explore:
+**DO NOT assume file locations.** Use `execute` to explore with LIMITED SCOPE:
 
 ```bash
-# Discover patient DICOM directory
-find /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom -type d -name "*{PATIENT_ID}*" 2>/dev/null
+# Discover patient DICOM directory (maxdepth 4 prevents server-wide search)
+find /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom -maxdepth 4 -type d -name "*{PATIENT_ID}*" 2>/dev/null
 
-# Or search more broadly
+# Alternative: list and grep (faster for known structure)
 ls -la /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom/ | grep -i "{patient_id}"
 ```
 
@@ -42,10 +71,16 @@ ls -la /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom/ | grep -i "{patien
 /media/luzhenyang/project/ChangHai_PDA/data/raw/dicom/dicom_data/CPTAC-PDA/C3L-03356/
 ```
 
+**If not found in standard location, try broader patterns (still limited scope):**
+```bash
+# Search with broader pattern but still limited to project directory
+find /media/luzhenyang/project/ChangHai_PDA/data -maxdepth 5 -type d -name "*{PATIENT_ID}*" 2>/dev/null
+```
+
 ### Step 2: Validate DICOM Structure
 ```bash
-# Count DICOM files
-find {discovered_path} -name "*.dcm" | wc -l
+# Count DICOM files (limited scope)
+find {discovered_path} -maxdepth 2 -name "*.dcm" 2>/dev/null | wc -l
 
 # Expected: 100-500 files for a CT series
 # If 0 files → Check for .IMA or no extension

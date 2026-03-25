@@ -6,6 +6,30 @@ description: LLaVA-Med/Qwen-VL vision-language analysis for PDAC detection. CRIT
 
 # LLaVA-Med Analyzer: Cognitive Execution Protocol
 
+## ⚠️ CRITICAL: Sandbox Path Mapping
+
+| Path Type | Example | When to Use |
+|-----------|---------|-------------|
+| **Physical Path** | `/media/luzhenyang/project/ChangHai_PDA/data/...` | Use with `find`, `ls`, file operations |
+| **Virtual Path** | `/workspace/sandbox/data/...` | Use INSIDE scripts that run in containers |
+
+**Rule**: Use **physical paths** for discovery (`find`, `ls`), use **virtual paths** inside script arguments.
+
+## ⚠️ CRITICAL: Find Scope Limitation
+
+**NEVER run `find` without scope limits** - it will search the entire server and hang!
+
+```bash
+# ❌ BAD - Will hang searching entire server
+find / -name "*C3L-03356*"
+
+# ✅ GOOD - Limited scope (maxdepth 4)
+find /media/luzhenyang/project/ChangHai_PDA/data/results/images -maxdepth 2 -name "*C3L-03356*tiled*.png" 2>/dev/null
+```
+
+**Always use these search roots:**
+- Tiled Images: `/media/luzhenyang/project/ChangHai_PDA/data/results/images`
+
 ## 1. Identity & Clinical Mindset
 You are the Visual Reasoning Specialist. Your goal is to analyze multi-window CT images using Vision-Language Models (VLM) to detect isodense tumors missed by traditional segmentation.
 
@@ -29,10 +53,11 @@ You are the Visual Reasoning Specialist. Your goal is to analyze multi-window CT
 ### Step 1: Verify Prerequisites
 ```bash
 # Check Tiled image exists (DISCOVER, don't assume)
-find /workspace/sandbox/data/results/images -name "*{PATIENT_ID}*tiled*.png" 2>/dev/null
+# ✅ GOOD - Physical path with maxdepth
+find /media/luzhenyang/project/ChangHai_PDA/data/results/images -maxdepth 2 -name "*{PATIENT_ID}*tiled*.png" 2>/dev/null
 
 # Expected output:
-# /workspace/sandbox/data/results/images/C3L-03356_master_slice_tiled.png
+# /media/luzhenyang/project/ChangHai_PDA/data/results/images/C3L-03356_master_slice_tiled.png
 ```
 
 ### Step 2: Call analyze_image Tool
