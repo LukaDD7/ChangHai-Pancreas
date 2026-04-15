@@ -49,7 +49,7 @@ You are the 3D Geometric Computation Specialist. Your goal is to determine surgi
 **Executable**: `/media/luzhenyang/project/ChangHai_PDA/skills/vascular_topology/scripts/calculate_angles.py`
 **Arguments**:
 - `--tumor-mask <path>`: Binary tumor mask from nnU-Net
-- `--vessel-dir <path>`: Directory with TotalSegmentator vessel masks
+- `--vessel-dir <path>`: Directory with canonical vessel masks (from TotalSegmentator and/or the dedicated pancreatic vessel segmentor)
 - `--patient-id <id>`: Patient identifier
 - `--output <path>`: JSON output path
 
@@ -130,7 +130,7 @@ else:
 | Error | Diagnosis | Deep Drill Action |
 |-------|-----------|-------------------|
 | Tumor mask not found | nnU-Net not run | Go back to nnunet_segmentor |
-| Vessel masks missing | TotalSegmentator incomplete | Re-run with `--task total` |
+| Vessel masks missing | Canonical vessel library incomplete | Run `pancreatic_vessel_segmentor` to publish canonical vessel masks, then re-check availability |
 | Angle calculation fails | Tumor too small or scattered | Use VLM visual assessment instead |
 | SMA/SMV not segmented | Vessels outside FOV | Note limitation in report |
 

@@ -1,0 +1,19 @@
+{
+  "name": "pancreatic_vessel_segmentor",
+  "category": "vascular_segmentation",
+  "description": "Builds a canonical pancreatic vessel library and is the dedicated fallback when TotalSegmentator misses SMA/SMV/CA/CHA/splenic artery/GDA.",
+  "entrypoint": "scripts/run_canonical_vessel_library.py",
+  "arguments": [
+    "--output-dir",
+    "--totalseg-dir",
+    "--dedicated-dir"
+  ],
+  "outputs": [
+    "superior_mesenteric_artery.nii.gz",
+    "superior_mesenteric_vein.nii.gz",
+    "celiac_trunk.nii.gz",
+    "common_hepatic_artery.nii.gz",
+    "splenic_artery.nii.gz",
+    "gastroduodenal_artery.nii.gz"
+  ]
+}

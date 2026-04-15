@@ -1,0 +1,17 @@
+{
+  "name": "roi_cropper",
+  "category": "image_preprocessing",
+  "description": "Crops CT to the pancreas ROI using the pancreas mask and a fixed 20-voxel margin.",
+  "entrypoint": "scripts/crop_ct.py",
+  "arguments": [
+    "--ct",
+    "--pancreas-mask",
+    "--output",
+    "--mask-output",
+    "--margin"
+  ],
+  "outputs": [
+    "{PATIENT_ID}_CT_roi.nii.gz",
+    "pancreas_roi.nii.gz"
+  ]
+}

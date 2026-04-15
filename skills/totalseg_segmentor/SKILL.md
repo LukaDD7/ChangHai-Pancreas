@@ -1,26 +1,27 @@
 ---
 name: totalseg_segmentor
 category: anatomical_segmentation
-description: TotalSegmentator for organ and vessel segmentation. Generates masks for pancreas, SMA, SMV, aorta, and other structures essential for vascular topology analysis.
+description: TotalSegmentator for anatomy and baseline vessel segmentation. Provides pancreas and baseline structures; missing pancreatic vessels should trigger the dedicated pancreatic_vessel_segmentor skill.
 ---
 
 # TotalSegmentator: Cognitive Execution Protocol
 
 ## 1. Identity & Clinical Mindset
-You are the Anatomical Structure Mapper. Your goal is to segment key organs and vessels that will be used for:
+You are the Anatomical Structure Mapper. Your goal is to segment the baseline anatomy that will be used for:
 - Pancreas localization (for master slice extraction)
-- Vessel identification (SMA, SMV, CA, PV for topology analysis)
+- Baseline vessel context (aorta, portal-venous structures, IVC)
 - Spatial reference for tumor segmentation
 
-**Key Principle**: TotalSegmentator provides the ANATOMICAL FRAMEWORK. Without it, vascular topology is impossible.
+**Key Principle**: TotalSegmentator provides the ANATOMICAL FRAMEWORK. When pancreatic vessels needed for topology are missing, the agent must escalate to `pancreatic_vessel_segmentor` rather than assuming TotalSegmentator alone is sufficient.
 
 ## 2. API Contract (Execution)
 **Environment**: `conda run -n totalseg`
-**Executable**: `TotalSegmentator` (installed CLI)
+**Executable**: `/media/luzhenyang/project/ChangHai_PDA/skills/totalseg_segmentor/scripts/run_totalseg.py`
 **Arguments**:
 - `-i <input>`: Input NIfTI CT file
 - `-o <output>`: Output directory for segmentation masks
 - `--fast`: Use fast mode (sufficient for most cases)
+- `--high-res-vessels`: Run a second vessel-focused pass and normalize pancreatic vessel masks into the vessel library
 
 **(Agent, you MUST verify NIfTI exists before running!)**
 
@@ -70,17 +71,25 @@ conda run -n totalseg TotalSegmentator \
 **Expected Duration**: 2-5 minutes on GPU
 
 ### Step 4: Verify Output Masks
-**CRITICAL**: Verify ALL required masks exist:
+**CRITICAL**: Verify the masks that are actually present in the current TotalSegmentator release and mark any missing pancreatic vessels explicitly:
 
 ```bash
 ls -lh /workspace/sandbox/data/processed/segmentations/{PATIENT_ID}/
 
-# REQUIRED masks for downstream analysis:
+# REQUIRED baseline masks for downstream analysis:
 # - pancreas.nii.gz (for master slice extraction)
-# - superior_mesenteric_artery.nii.gz or sma.nii.gz
-# - superior_mesenteric_vein.nii.gz or smv.nii.gz
 # - aorta.nii.gz
 # - portal_vein_and_splenic_vein.nii.gz
+#
+# Optional / case-dependent pancreatic vessels:
+# - superior_mesenteric_artery.nii.gz or sma.nii.gz
+# - superior_mesenteric_vein.nii.gz or smv.nii.gz
+# - celiac_trunk.nii.gz
+# - common_hepatic_artery.nii.gz
+# - splenic_artery.nii.gz
+# - gastroduodenal_artery.nii.gz
+#
+# If these are absent in the baseline pass, the Agent MUST invoke `pancreatic_vessel_segmentor` to publish canonical vessel masks before concluding that the vessel is unavailable.
 ```
 
 ### Step 5: Extract Pancreas Max Slice
@@ -102,13 +111,14 @@ print(f'Max area slice: Z={max_z}, Area={areas[max_z]} voxels')
 |-------|-----------|-------------------|
 | TotalSegmentator not found | Environment not activated | Use `conda run -n totalseg` |
 | CUDA out of memory | GPU memory exhausted | Retry with `--fast` flag |
-| Missing vessel masks | Vessels not segmented | Check if `-ta pancreas` includes vessels |
+| Missing vessel masks | Baseline pass missed pancreatic vessels | Run `pancreatic_vessel_segmentor` to publish canonical vessel masks into the vessel library |
 | Empty pancreas mask | Pancreas not found | Check CT phase (must be venous) |
 
 ## 5. Success Criteria
 - [ ] TotalSegmentator executed successfully
 - [ ] pancreas.nii.gz exists and non-empty
-- [ ] SMA/SMV masks exist (for vascular topology)
+- [ ] Baseline anatomy masks exist (pancreas/aorta/portal venous structures)
+- [ ] If critical pancreatic vessels are missing, `pancreatic_vessel_segmentor` was invoked to publish canonical vessel masks
 - [ ] Max area slice Z identified
 - [ ] All paths documented for downstream skills
 

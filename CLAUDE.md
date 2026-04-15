@@ -24,9 +24,10 @@
 │  ├── analyze_image (VLM视觉分析)                             │
 │  └── submit_pdac_report (报告提交+引用验证)                   │
 ├─────────────────────────────────────────────────────────────┤
-│  Skills (7个挂载技能):                                       │
+│  Skills (8个挂载技能):                                       │
 │  ├── /skills/dicom_processor/          (DICOM→NIfTI)         │
 │  ├── /skills/totalseg_segmentor/       (器官分割)             │
+│  ├── /skills/roi_cropper/              (胰腺ROI裁剪)           │
 │  ├── /skills/nnunet_segmentor/         (肿瘤分割)             │
 │  ├── /skills/master_slice_extractor/   (多窗位Tiled切片)      │
 │  ├── /skills/llava_med_analyzer/       (VLM视觉分析)          │
@@ -159,9 +160,19 @@ conda create -n ChangHai python=3.10 gxx_linux-64=11.* gcc_linux-64=11.* gfortra
 ```bash
 conda run -n totalseg python script.py
 ```
-- **用途**: TotalSegmentator 器官/血管分割
+- **用途**: TotalSegmentator 器官/基础血管分割
 - **核心包**: nibabel, numpy, scipy, matplotlib, scikit-image
 - **功能**: CT预处理、血管分割、可视化、评估报告生成
+- **已验证安装版本**: `TotalSegmentator 2.13.0`
+- **已验证本地权重目录**: `~/.totalsegmentator/nnunet/results/`
+  - `Dataset291_TotalSegmentator_part1_organs_1559subj`
+  - `Dataset292_TotalSegmentator_part2_vertebrae_1532subj`
+  - `Dataset293_TotalSegmentator_part3_cardiac_1559subj`
+  - `Dataset294_TotalSegmentator_part4_muscles_1559subj`
+  - `Dataset295_TotalSegmentator_part5_ribs_1559subj`
+  - `Dataset297_TotalSegmentator_total_3mm_1559subj`
+  - `Dataset298_TotalSegmentator_total_6mm_1559subj`
+- **当前已验证限制**: 即使去掉 `--fast`，`total` 主任务在 CL-03356 上仍只稳定产出 `pancreas.nii.gz`、`aorta.nii.gz`、`portal_vein_and_splenic_vein.nii.gz`，未产出 `superior_mesenteric_artery.nii.gz`、`superior_mesenteric_vein.nii.gz`、`celiac_trunk.nii.gz`。这说明问题不是权重降级到 v1.5，而是当前任务/类目本身不足以满足 PDAC 关键血管要求。
 
 ### 3. nnunetv2 (nnU-Net 专用)
 ```bash
@@ -273,16 +284,17 @@ export RESULTS_FOLDER="/media/luzhenyang/project/ChangHai_PDA/data/models/nnunet
 ## 技术栈与数据流
 
 ```
-DICOM → NIfTI → TotalSegmentator (器官/血管) → 评估报告
-                ↘ nnU-Net v1 (肿瘤) ↗
+DICOM → NIfTI → TotalSegmentator (器官/基础血管) → canonical vessel library → 评估报告
+                ↘ roi_cropper → nnU-Net v1 (肿瘤) ↗
 ```
 
 | 步骤 | 工具 | 输出 |
 |------|------|------|
-| 1. 器官分割 | TotalSegmentator | 胰腺、血管等正常结构 |
-| 2. 肿瘤分割 | nnU-Net v1 (MSD Task07) | 真实肿瘤 Mask (5.25ml) |
-| 3. 侵犯评估 | vascular_topology.py | 血管包绕角度 |
-| 4. 临床报告 | final_integrated_assessment.py | 可切除性判定 |
+| 1. 器官分割 | TotalSegmentator | 胰腺、基础结构 |
+| 2. 血管补全 | pancreatic_vessel_segmentor | canonical vessel library |
+| 3. 肿瘤分割 | roi_cropper + nnU-Net v1 (MSD Task07) | 真实肿瘤 Mask |
+| 4. 侵犯评估 | vascular_topology.py | 血管包绕角度 |
+| 5. 临床报告 | final_integrated_assessment.py | 可切除性判定 |
 
 ## MSD Task07 模型
 
@@ -344,5 +356,35 @@ python -m llava.serve.model_worker \
 conda run -n llava-med python scripts/verify_llava_med.py
 ```
 
+### 全面临床测试 (新增)
+
+**测试脚本**: `data/scripts/test_llava_med_comprehensive.py`
+
+**官方使用方式**:
+- 单窗位图像输入（非tiled拼接）
+- vicuna_v1 对话模板
+- temperature=0.2, top_p=0.95
+- max_new_tokens=512
+
+**临床测试覆盖（7个测试用例）**:
+
+| 测试ID | 诊断任务 | 临床场景 | 窗位 |
+|--------|----------|----------|------|
+| L1 | 实性vs囊性鉴别 | 胰腺占位初步定性 | standard |
+| L2 | PDAC vs pNET | 实性肿瘤分型 | arterial |
+| L3 | 囊性四分型 | SCN/MCN/IPMN/SPN | venous |
+| L4 | CTSI评分 | 急性胰腺炎严重度 | venous |
+| L5 | 慢性胰腺炎 | 影像严重程度评估 | standard |
+| L6 | 血管侵犯评估 | 可切除性判断(NCCN) | arterial |
+| L7 | 双管征检测 | PDAC特征征象 | standard |
+
+**执行命令**:
+```bash
+CUDA_VISIBLE_DEVICES=6 conda run -n llava-med python \
+  /media/luzhenyang/project/ChangHai_PDA/data/scripts/test_llava_med_comprehensive.py
+```
+
+**输出**: `data/results/llava_med_tests/llava_med_comprehensive_test_{timestamp}.json`
+
 ---
-*最后更新: 2026-03-25*
+*最后更新: 2026-03-30*

@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-03-30
+
+### LLaVA-Med Comprehensive Clinical Testing Framework
+
+#### Added
+- **Comprehensive test suite** (`test_llava_med_comprehensive.py`):
+  - Official LLaVA-Med inference pattern (single-window, non-tiled)
+  - vicuna_v1 conversation template
+  - GPU device selection support (`--gpu` flag, default: GPU 6)
+  - Model caching to avoid repeated loading
+
+- **7 Clinical Test Cases** covering 5-layer diagnostic workflow:
+  1. **L1 - Solid vs Cystic Classification**: Initial characterization of pancreatic masses
+  2. **L2 - PDAC vs pNET Differentiation**: Solid tumor subtype classification
+  3. **L3 - Cystic Tumor Subtyping**: SCN/MCN/IPMN/SPN classification
+  4. **L4 - Acute Pancreatitis CTSI**: CT Severity Index scoring (Atlanta 2024)
+  5. **L5 - Chronic Pancreatitis Scoring**: Cambridge/MRCP severity assessment
+  6. **L6 - Vascular Invasion Assessment**: NCCN resectability criteria (SMA/SMV/CA/CHA/PV)
+  7. **L7 - Double Duct Sign Detection**: PDAC-specific sign (CBD + MPD dilation)
+
+- **Structured prompts** for each diagnostic task:
+  - Clinical guidelines embedded (NCCN 2025, Atlanta 2024, WHO 2024)
+  - Specific evaluation criteria
+  - Standardized output format (diagnosis, confidence, key findings)
+
+#### Changed
+- **LLaVA-Med model loading** (`builder.py`):
+  - Fixed: `low_cpu_mem_usage=False` → `True` to support device_map
+  - Enables proper multi-GPU allocation
+
+- **Delayed initialization pattern**:
+  - CUDA_VISIBLE_DEVICES set before torch import
+  - Prevents GPU allocation conflicts
+
+#### Usage
+```bash
+# Run all 7 clinical tests on specified GPU
+CUDA_VISIBLE_DEVICES=6 conda run -n llava-med python \
+  data/scripts/test_llava_med_comprehensive.py
+
+# Output saved to:
+# data/results/llava_med_tests/llava_med_comprehensive_test_{timestamp}.json
+```
+
+#### Status
+- ⚠️ **Blocked**: All GPUs occupied (wupengli: train_softcot9_22.py)
+- **Ready to run** when GPU resources available
+
+---
+
+## [1.1.1] - 2026-03-26
+
+### TotalSegmentator Version and Weight Audit
+
+#### Verified
+- **Installed package**: `TotalSegmentator 2.13.0`
+- **Installed weights** are v2-style dataset series under `~/.totalsegmentator/nnunet/results/`, including:
+  - `Dataset291_TotalSegmentator_part1_organs_1559subj`
+  - `Dataset292_TotalSegmentator_part2_vertebrae_1532subj`
+  - `Dataset293_TotalSegmentator_part3_cardiac_1559subj`
+  - `Dataset294_TotalSegmentator_part4_muscles_1559subj`
+  - `Dataset295_TotalSegmentator_part5_ribs_1559subj`
+  - `Dataset297_TotalSegmentator_total_3mm_1559subj`
+  - `Dataset298_TotalSegmentator_total_6mm_1559subj`
+
+#### Changed
+- Confirmed the current installation is **not** a downgraded v1.5 setup.
+- Confirmed that removing `--fast` from the `total` task does **not** produce SMA/SMV/CA masks for CL-03356.
+
+#### Impact
+- The missing PDAC-critical vessels are now attributed to current TotalSegmentator task/class coverage rather than a package downgrade.
+- Pan-Agent still requires a dedicated pancreatic vessel-capable model or an alternative segmentation pass to reach the target standard for SMA, SMV, PV, and CA analysis.
+
+---
+
 ## [1.0.0] - 2026-03-24
 
 ### Major Architecture Refactoring
@@ -164,4 +239,4 @@ The Agent now makes more intelligent, context-aware decisions.
 
 ---
 
-*Last Updated: 2026-03-25*
+*Last Updated: 2026-03-30*

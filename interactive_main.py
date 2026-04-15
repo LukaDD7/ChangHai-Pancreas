@@ -454,14 +454,16 @@ L3_SYSTEM_PROMPT = """You are the ChangHai PDAC MDT Chief Agent - an autonomous 
      find / -name "*.nii.gz"
      ```
 
-2. **DEEP DRILL PROTOCOL** (深钻探针):
-   - When nnU-Net returns tumor volume = 0ml, you MUST NOT conclude "no tumor"!
-   - This is likely an isodense tumor (desmoplastic PDAC) invisible to HU-threshold methods.
-   - You MUST trigger Deep Drill:
-     a) Invoke `master_slice_extractor` to generate multi-window Tiled image
+2. **ROI-CROP-FIRST TUMOR QUANTIFICATION** (定量前置优化):
+   - Before nnU-Net, you MUST check whether `pancreas.nii.gz` exists.
+   - If the pancreas mask exists, you MUST first invoke `roi_cropper` to generate `cropped_CT.nii.gz` (or the equivalent ROI CT) with the pancreas-centered 20-voxel margin.
+   - Then feed the cropped CT into `nnunet_segmentor` for tumor inference.
+   - Only if the cropped CT still yields tumor volume = 0ml, you MUST treat this as an extreme isodense occult tumor case and trigger Deep Drill.
+   - Deep Drill sequence in that case:
+     a) Invoke `master_slice_extractor` to generate a multi-window Tiled image
      b) Use `analyze_image` with LLaVA-Med to visually confirm
      c) If VLM reports suspicious morphology → ENDOGENOUS_FALSE_NEGATIVE
-   - Failure to trigger Deep Drill on 0ml result is a CRITICAL ERROR.
+   - Skipping roi_cropper when a pancreas mask is available is a CRITICAL ERROR.
 
 3. **EXECUTION AUDIT LOOP** (强审计闭环):
    - Every `execute` call is recorded to `execution_audit_log.txt`
@@ -477,15 +479,17 @@ L3_SYSTEM_PROMPT = """You are the ChangHai PDAC MDT Chief Agent - an autonomous 
 
 ### Checkpoint 1: Environmental Awareness (环境感知)
 - [ ] Use `execute` with `ls` and `find` to locate patient's DICOM/NIfTI files
-- [ ] Verify TotalSegmentator masks exist (pancreas.nii.gz, SMA.nii.gz, SMV.nii.gz)
+- [ ] Verify canonical anatomy/vessel masks exist (pancreas.nii.gz plus canonical vessel filenames such as superior_mesenteric_artery.nii.gz / superior_mesenteric_vein.nii.gz when available)
 - [ ] Confirm coordinate system alignment (all files in same 1.0mm³ isotropic space)
 - [ ] Document discovered paths in your reasoning
 
 ### Checkpoint 2: Tumor Quantification (肿瘤定量)
-- [ ] Execute nnU-Net segmentation
-- [ ] **CRITICAL**: If volume = 0ml → TRIGGER DEEP DRILL (multi-window + VLM)
+- [ ] Before nnU-Net, check whether a pancreas mask exists and probe `roi_cropper` to create a tighter CT ROI if available
+- [ ] If `pancreas.nii.gz` exists, force `roi_cropper` first and generate `cropped_CT.nii.gz` (or equivalent ROI CT)
+- [ ] Feed the cropped CT into `nnunet_segmentor` for tumor inference
+- [ ] **CRITICAL**: Only if the cropped CT still yields tumor volume = 0ml, trigger Deep Drill Protocol
 - [ ] If volume > 0ml → Record exact volume with physical traceability
-- [ ] Citation: [Script: analyze_tumor.py, Output: Volume {X}ml]
+- [ ] Citation: [Script: roi_cropper.py, Output: cropped_CT.nii.gz] + [Script: analyze_tumor.py, Output: Volume {X}ml]
 
 ### Checkpoint 3: Vascular Topology (血管拓扑)
 - [ ] Calculate wrapping angles: SMA, SMV, Celiac Artery (CA), Main Portal Vein (MPV)
@@ -537,11 +541,14 @@ L3_SYSTEM_PROMPT = """You are the ChangHai PDAC MDT Chief Agent - an autonomous 
 
 **Deep Drill Trigger:**
 ```
-IF nnU-Net_Volume == 0ml:
-    TRIGGER DeepDrill:
-        1. master_slice_extractor (generate Tiled image)
-        2. analyze_image (VLM visual confirmation)
-        3. IF VLM suspicious: FLAG ENDOGENOUS_FALSE_NEGATIVE
+IF pancreas mask exists:
+    1. roi_cropper → cropped_CT.nii.gz
+    2. nnU-Net on cropped_CT.nii.gz
+    3. IF cropped_CT nnU-Net volume == 0ml:
+         TRIGGER DeepDrill:
+             a. master_slice_extractor (generate Tiled image)
+             b. analyze_image (VLM visual confirmation)
+             c. IF VLM suspicious: FLAG ENDOGENOUS_FALSE_NEGATIVE
 ```
 """
 
@@ -1075,6 +1082,8 @@ agent = create_deep_agent(
     skills=[
         "/skills/dicom_processor",
         "/skills/totalseg_segmentor",
+        "/skills/pancreatic_vessel_segmentor",
+        "/skills/roi_cropper",
         "/skills/nnunet_segmentor",
         "/skills/master_slice_extractor",
         "/skills/llava_med_analyzer",
@@ -1110,6 +1119,7 @@ Core Mechanisms:
 
 Mandatory Checkpoints:
   ☐ Environmental Awareness (ls/find)
+  ☐ ROI Cropping probe before nnU-Net when pancreas mask is available
   ☐ Tumor Quantification (nnU-Net + Deep Drill if 0ml)
   ☐ Vascular Topology (SMA/SMV angles)
   ☐ Cognitive Dissonance Detection
