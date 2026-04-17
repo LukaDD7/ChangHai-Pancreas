@@ -57,7 +57,12 @@ class VascularShapeEvaluator:
         float or None
             Eccentricity in [0, 1), or None if no valid contour is found.
         """
-        mask_bin = (mask > 127).astype(np.uint8)
+        # Support both binary masks (0/1) and uint8 masks (0/255)
+        unique_vals = np.unique(mask)
+        if len(unique_vals) == 2 and set(unique_vals).issubset({0, 1}):
+            mask_bin = (mask > 0.5).astype(np.uint8)
+        else:
+            mask_bin = (mask > 127).astype(np.uint8)
         contours, _ = cv2.findContours(mask_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
@@ -106,7 +111,12 @@ class VascularShapeEvaluator:
             - is_teardrop: True if both conditions hold
             - defect_points: list of (y, x) defect coordinates, or None
         """
-        mask_bin = (mask > 127).astype(np.uint8)
+        # Support both binary masks (0/1) and uint8 masks (0/255)
+        unique_vals = np.unique(mask)
+        if len(unique_vals) == 2 and set(unique_vals).issubset({0, 1}):
+            mask_bin = (mask > 0.5).astype(np.uint8)
+        else:
+            mask_bin = (mask > 127).astype(np.uint8)
         contours, _ = cv2.findContours(mask_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return False, None
@@ -159,7 +169,12 @@ class VascularShapeEvaluator:
 
         A perfect circle returns 1.0; elongated shapes return < 1.0.
         """
-        mask_bin = (mask > 127).astype(np.uint8)
+        # Support both binary masks (0/1) and uint8 masks (0/255)
+        unique_vals = np.unique(mask)
+        if len(unique_vals) == 2 and set(unique_vals).issubset({0, 1}):
+            mask_bin = (mask > 0.5).astype(np.uint8)
+        else:
+            mask_bin = (mask > 127).astype(np.uint8)
         contours, _ = cv2.findContours(mask_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
