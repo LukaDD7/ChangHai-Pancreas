@@ -148,13 +148,10 @@ workspace/sandbox/execution_logs/
 ```bash
 conda activate ChangHai
 ```
-- **用途**: 主系统开发环境，与专用模型环境隔离
-- **Python**: 3.10.20
-- **GCC**: 11.x (兼容旧服务器)
-- **安装命令**:
-```bash
-conda create -n ChangHai python=3.10 gxx_linux-64=11.* gcc_linux-64=11.* gfortran_linux-64=11.* libstdcxx-ng libgcc-ng
-```
+- **用途**: 主系统开发环境，`mdt_agent/` 几何管线运行环境
+- **Python**: 3.11 (anaconda3/envs/ChangHai)
+- **已安装额外包**: `pip install opencv-python SimpleITK`
+- **运行工具脚本**: `/home/luzhenyang/anaconda3/envs/ChangHai/bin/python`
 
 ### 2. totalseg (TotalSegmentator 专用)
 ```bash
@@ -257,6 +254,7 @@ conda activate nnunetv2
 
 | 文件 | 路径 | 功能 | 所属环境 |
 |------|------|------|----------|
+| `mdt_agent/` | `mdt_agent/` | 几何管线核心（centerline/geometry_detector/mpr_controller） | ChangHai |
 | `final_integrated_assessment.py` | `scripts/` | 跨模态联调 (肿瘤+血管) | totalseg |
 | `vascular_topology.py` | `scripts/` | 血管包绕角度计算 | totalseg |
 | `panel_vascular_assessment.py` | `scripts/` | 血管评估面板 | totalseg |
