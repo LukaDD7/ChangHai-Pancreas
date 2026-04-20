@@ -1,3 +1,21 @@
+# 初始方案 (PancreasMDT v1.0)
+
+## 临床叙事 (Clinical Narrative)
+*   **痛点 A：破解“等密度陷阱” (The Invisible Tumor)**：针对 10% 无法被常规分割模型识别的等密度 PDAC，建立基于 Agent 视觉感知与几何推理的补位机制，构建“认知安全网”。
+*   **痛点 B：终结“拟态迷宫” (The Mimic Trap)**：胰腺炎 (AP/CP) 与肿瘤 (PDAC/pNET) 在影像上极易混淆，通过全病谱精标数据驱动的 MDT 专家舰队，实现从“图像分类”到“临床决策”的跨越。
+
+## AI 技术创新点 (Technical Innovations)
+1.  **主动感知的正交巡航 (Active Topological MPR Cruise)**：
+    - 改变 3D 固定空间输入的思维，由智能体动态控制采样平面 (MPR) 沿着血管/胰管中心线进行“剥洋葱”式的主动探查。
+    - 结合强化学习 (RL) 或策略梯度，实现针对囊性/实性病灶的自动化最优诊断切面选取。
+2.  **具备治理能力的 Agent Harness (Governed Reasoning Loop)**：
+    - 引入“认知失调监测 (Cognitive Dissonance Detection)”机制，当分割结果与 VLM 视觉发现存在冲突时，触发自动纠偏。
+    - 利用 1.7TB 精标数据作为“长程记忆库”，通过 RAG-Imaging 技术进行跨病例证据比对。
+3.  **全病谱诊断流形对齐 (Cross-Pathology Manifold Alignment)**：
+    - 建立统一的胰腺影像诊断流形，将 AP, CP, PDAC, NET 等 8 类病变映射至同一语义空间，实现多病种的稳健鉴别诊断。
+
+---
+
 # 胰腺癌/医学影像多智能体文献精读矩阵 (Literature Review Matrix)
 
 此文档用于严谨沉淀我们所调研的高水平论文。在确定 PancreasMDT 的最终 Standing Point 之前，我们依据“Clinical Pain Point (临床痛点)”与“Knowledge Gap (知识空白/研究间隙)”进行横向比对，确保我们的创新直击痛点。
