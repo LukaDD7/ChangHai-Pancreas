@@ -11,7 +11,7 @@ mocs: (Interdisciplinary Index)
 
 ## 🎯 Research Overview
 - **Problem:** 多模态 VLM 直接给结论，缺乏基于证据的分步推理，导致可靠性不足。
-- **Contribution:** 分层诊断工作流 — Disease-level (指南 RAG) → Patient-level (个体化工具调用) → 逐步验证。
+- **Contribution:** **分层推理范式 (Hierarchical Paradigm)** —— 将诊断逻辑解耦为 Disease-level (指南 RAG 对齐) → Patient-level (个体化影像逻辑对齐) → 逐步验证。
 - **Impact:** ICLR 2025; 在多种解剖区域、成像模态和疾病类型上超越主流 VLM 和专家模型。
 
 ## 🔬 Architecture (分层推理)

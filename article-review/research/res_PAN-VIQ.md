@@ -13,9 +13,12 @@ tags: [pancreatic-cancer, vascular-invasion, nnU-Net, 3D-geometry, centerline, P
 mocs: (Interdisciplinary Index)
 ---
 
-# PAN-VIQ: Pancreatic Vascular Invasion Quantifier — DFR Phase 1 骨折级解构
+# PAN-VIQ: Pancreatic Vascular Invasion Quantifier — 3D 连续血管包绕角自动定量框架
 
 ![PAN-VIQ Architecture](../_assets/PAN-VIQ_arch.png)
+
+## 0. 论文自述核心故事 (The Story)
+PAN-VIQ 是首个经过多中心临床验证的 **3D 连续空间量化系统**。它成功将放射科医生对血管包绕评估的主观性 (Kappa 0.28-0.55) 转化为具备高度一致性的几何物理度量，实现了与高年资专家非劣效的判定精度。
 
 ---
 

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Source: RadGPT (ICCV 2025)"
 id: "RadGPT-ICCV2025"
 author: "Bassi et al."
@@ -9,7 +9,10 @@ type: "paper"
 tags: ["agent", "abdominal-ct", "report-generation", "AbdomenAtlas-3.0"]
 ---
 
-# RadGPT: Constructing 3D Image-Text Tumor Datasets
+# RadGPT: 结构化影像语料库构建 Agent (Structural Imaging Corpus Construction Agent)
+
+## 0. 论文自述核心故事 (The Story)
+RadGPT 是首个实现 **3D 空间、Mask 与叙述性报告自动配对** 的结构化 Agent。它解决了公共影像领域“缺乏高质量图文配对数据”的瓶颈，通过 Segment-Extract-Transform 三阶段 Pipeline，为大规模放射大模型的训练提供了标准化的语义土壤。
 
 ## Evidence Map
 - **Evidence_ID: RadGPT_Arch_01**: The framework uses a three-stage pipeline: **Segment → Extract → Transform**. [p.4]

@@ -13,7 +13,12 @@
    - 胰腺癌包绕 (Pancreatic Vascular Encasement): 由于等密度边缘模糊及复杂的 3D 拓扑结构，临床医生评估血管包绕角 (如 <180° vs >180°) 的 Kappa 值仅为 0.28–0.55 (Fair to Moderate agreement，*基于现有专科临床文献共识*)。这才是真正的高阶推理痛点。
 
 **假说**:
-将工作流解构（检测 -> 扫图提取 -> 分析），结合 **Focal Prompting Mechanism (包含 Gated Cross-Attention)**，并集成 Medical GraphRAG，能实现多智能体精细度上的跨越。
+将工作流解构为 **Spotter (对应初筛定位)**、**SR (性状报告)** 与 **DAS (诊断分析专家)**，结合 **Focal Prompting Mechanism** 与 **Medical GraphRAG**，能实现多智能体精细度上的跨越。
+
+### 1.1 临床角色映射 (Clinical Mapping)
+- **Spotter (探测者)**: 模拟放射科医生初次快读扫描 (Fast Volume Scanning)，负责“发现病灶定位”，解决漏诊问题。对应临床初筛步骤。
+- **SR (Sign Reporter)**: 模拟对病灶形态学特征（如边缘、密度、分叶）的结构化描述。
+- **DAS (Diagnosis Specialist)**: 模拟主治医师结合指南与多模态证据进行最终恶性度判定。
 
 ## 2. 系统核心模块解构 (Architecture Deconstruction)
 

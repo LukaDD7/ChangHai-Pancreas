@@ -13,7 +13,7 @@ tags: [agent, pathology, WSI, LLM, training-free, navigation]
 mocs: (Interdisciplinary Index)
 ---
 
-# PathAgent: WSI 可解释分析框架 — DFR Phase 1 骨折级解构
+# PathAgent: 首个免训练交互式病理分析 Agent — 模拟病理医师探针式巡航
 
 ![PathAgent Architecture](../_assets/PathAgent_arch.png)
 
